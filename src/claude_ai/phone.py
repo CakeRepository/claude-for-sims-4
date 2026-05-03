@@ -94,11 +94,17 @@ Traits add flavor ON TOP of age and family role:
 - Geek: references. Evil: backhanded. Mean: blunt. Good: warm.
 
 Rules:
-- Write 3-5 short lines of dialogue (what the caller says)
+- Write 2-3 SHORT lines of dialogue (what the caller says). Keep it brief — like a real \
+  quick phone call, not a monologue. ONE topic, not multiple.
 - The call should have a reason: sharing news, asking for advice, inviting somewhere, \
   gossiping, complaining, celebrating, or just checking in
 - Occasionally sprinkle in Simlish words naturally (Sul sul, Dag dag, Nooboo)
 - Never use profanity or explicit content
+- NEVER write romantic, flirty, or sexual content for FAMILY members \
+  (parents, children, siblings, grandparents, grandchildren, in-laws, aunts/uncles, cousins). \
+  Family relationships in the context are NEVER romantic regardless of romance score.
+- Do NOT assume sims with the same last name are related or share a household — \
+  only use what's explicitly stated in the relationship info above.
 - Write dialogue lines only, prefixed with the caller's first name
 - NEVER break character. NEVER say you don't have information or need more details. \
   You are the sim — always stay in character and improvise. If someone mentions a person \
@@ -142,10 +148,16 @@ Traits add flavor ON TOP of age and family role:
 - Romantic: hearts, flirty. Loner: terse, minimal. Evil: passive aggressive.
 
 Rules:
-- Write 1-3 short text messages (like real phone texts)
+- Write 1-2 SHORT text messages — like a real text, not a paragraph. Max 2 sentences each. \
+  ONE topic, not multiple updates jammed together.
 - The text should have a purpose: making plans, sharing news/gossip, asking a question, \
   or reacting to something
 - Never use profanity or explicit content
+- NEVER write romantic, flirty, or sexual content for FAMILY members \
+  (parents, children, siblings, grandparents, grandchildren, in-laws, aunts/uncles, cousins). \
+  Family relationships in the context are NEVER romantic regardless of romance score.
+- Do NOT assume sims with the same last name are related or share a household — \
+  only use what's explicitly stated in the sender info above.
 - NEVER break character. NEVER say you don't have information, can't roleplay, or need more details. \
   You are the sim — always stay in character and improvise naturally. If someone mentions a person \
   or event you weren't given details about, react like the sim would (curious, gossipy, confused, etc.) \
@@ -172,8 +184,11 @@ A distant father (low friendship) is awkward and stilted. A close father is warm
 - React authentically to what {main_name} said — don't be generic.
 
 Rules:
-- Write 1-3 short text messages as {other_name}'s reply
+- Write 1-2 SHORT text messages — like a real text, not an essay. Max 2 sentences each.
 - Never use profanity or explicit content
+- NEVER write romantic, flirty, or sexual content for FAMILY members \
+  (parents, children, siblings, grandparents, in-laws, aunts/uncles, cousins).
+- Do NOT assume sims with the same last name are related or share a household.
 - NEVER break character. NEVER say you don't have information or need more details. \
   Always stay in character and improvise naturally. NEVER acknowledge that you are an AI.
 
@@ -195,6 +210,29 @@ def _apply_mood_from_text(text, reason=None):
         if main_si:
             moodlets.apply_mood(main_si, mood_tag, reason=reason)
     return clean_text
+
+
+def _get_sims_on_active_lot():
+    """Return a set of sim_ids currently on the active lot."""
+    sim_ids = set()
+    try:
+        import services
+        zone = services.current_zone()
+        if not zone:
+            return sim_ids
+        # Iterate through all sims currently instantiated on the lot
+        sm = services.sim_info_manager()
+        if sm:
+            for si in sm.values():
+                try:
+                    sim = si.get_sim_instance()
+                    if sim is not None and sim.zone_id == zone.id:
+                        sim_ids.add(si.sim_id)
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return sim_ids
 
 
 def _is_ghost(sim_info):
@@ -269,6 +307,11 @@ def _pick_random_relationship_sim():
     allow_ghosts = config.get_config().getboolean("claude_ai", "phone_allow_ghosts", fallback=True)
     if not allow_ghosts:
         contacts = [c for c in contacts if not _is_ghost(c.get("sim_info"))]
+
+    # Filter out sims currently on the same lot (no point texting/calling someone who's right there)
+    on_lot = _get_sims_on_active_lot()
+    if on_lot:
+        contacts = [c for c in contacts if c.get("sim_id") not in on_lot]
 
     if not contacts:
         return None
@@ -360,38 +403,72 @@ def _get_mutual_contacts(contact):
     return mutuals
 
 
+# Map internal region names to friendly world names
+_WORLD_NAMES = {
+    "willowcreek": "Willow Creek",
+    "oasissprings": "Oasis Springs",
+    "newcrest": "Newcrest",
+    "windenburg": "Windenburg",
+    "sanmyshuno": "San Myshuno",
+    "brindletonbay": "Brindleton Bay",
+    "delsolvalley": "Del Sol Valley",
+    "sulani": "Sulani",
+    "britechester": "Britechester",
+    "evergreenharbor": "Evergreen Harbor",
+    "forgottenhollow": "Forgotten Hollow",
+    "strangerville": "StrangerVille",
+    "magicvenue": "Glimmerbrook",
+    "glimmerbrook": "Glimmerbrook",
+    "mtkomorebi": "Mt. Komorebi",
+    "henfordonbagley": "Henford-on-Bagley",
+    "henford": "Henford-on-Bagley",
+    "tartosa": "Tartosa",
+    "weddingworld": "Tartosa",
+    "magnoliapromenade": "Magnolia Promenade",
+    "moonwoodmill": "Moonwood Mill",
+    "copperdale": "Copperdale",
+    "selvadorada": "Selvadorada",
+    "batuu": "Batuu",
+    "alienworld": "Sixam",
+    "granitefalls": "Granite Falls",
+    "outdoorretreat": "Granite Falls",
+    "sansequoia": "San Sequoia",
+    "chestnutridge": "Chestnut Ridge",
+    "tomarang": "Tomarang",
+    "ciudadenamorada": "Ciudad Enamorada",
+    "ravenwood": "Ravenwood",
+    "nordhaven": "Nordhaven",
+    "innisgreen": "Innisgreen",
+}
+
+
+def _friendly_world_name(raw):
+    """Convert internal region name like 'WeddingWorld' to 'Tartosa'."""
+    if not raw:
+        return None
+    key = raw.lower().replace(" ", "").replace("_", "")
+    return _WORLD_NAMES.get(key, raw)
+
+
 def _get_sim_home_world(sim_info):
     """Get the world/neighborhood name where a sim lives."""
     try:
-        import services
         household = sim_info.household
         if household:
             home_zone_id = household.home_zone_id
             if home_zone_id:
-                # Try to get the region/world name from the zone
                 try:
                     from world.region import get_region_instance_from_zone_id
                     region = get_region_instance_from_zone_id(home_zone_id)
                     if region:
                         name = getattr(region, "__name__", "") or str(region)
-                        # Clean up the region name
                         cleaned = (name
                             .replace("Region_", "")
                             .replace("region_", "")
                             .replace("_", " ")
                             .strip())
                         if cleaned:
-                            return cleaned
-                except Exception:
-                    pass
-
-                # Fallback: try to get the lot name
-                try:
-                    persistence = services.get_persistence_service()
-                    if persistence:
-                        zone_data = persistence.get_zone_proto_buff(home_zone_id)
-                        if zone_data and zone_data.name:
-                            return zone_data.name
+                            return _friendly_world_name(cleaned)
                 except Exception:
                     pass
     except Exception:
@@ -626,10 +703,10 @@ def _describe_relationship(contact):
             parts.append(f"Also: {status}")
     if contact.get("friendship") is not None:
         parts.append(f"Friendship level: {contact['friendship']}")
-    if contact.get("romance") is not None:
+    if contact.get("romance") is not None and not family_label:
         parts.append(f"Romance level: {contact['romance']}")
-    if contact.get("in_household"):
-        parts.append("Lives in the same household")
+    if contact.get("in_household") is True:
+        parts.append("Lives in the same household as the player")
 
     return "\n".join(parts)
 
