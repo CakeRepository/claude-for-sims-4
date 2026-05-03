@@ -29,7 +29,16 @@ def _show_game_notification(title, message):
         if not client:
             return False
 
-        sim_info = client.active_sim_info
+        # Anchor to protagonist if set, otherwise active sim.
+        # Toddlers/kids/pets shouldn't appear to receive calls/texts.
+        sim_info = None
+        try:
+            from . import sim_context
+            sim_info = sim_context.get_main_sim_info()
+        except Exception:
+            pass
+        if not sim_info:
+            sim_info = client.active_sim_info
         if not sim_info:
             return False
 

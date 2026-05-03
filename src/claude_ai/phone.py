@@ -27,7 +27,16 @@ def _show_phone_dialog(caller_sim_info, title, message, ring=True):
         import services
 
         client = services.client_manager().get_first_client()
-        if not client or not client.active_sim_info:
+        if not client:
+            return False
+
+        # Anchor the phone dialog to the protagonist (who actually has a phone),
+        # falling back to active sim if no protagonist is set.
+        # This prevents toddlers/kids/pets from "receiving" calls and texts.
+        anchor_sim = sim_context.get_main_sim_info()
+        if not anchor_sim:
+            anchor_sim = client.active_sim_info
+        if not anchor_sim:
             return False
 
         loc_text = LocalizationHelperTuning.get_raw_text(message)
@@ -36,7 +45,7 @@ def _show_phone_dialog(caller_sim_info, title, message, ring=True):
         loc_dismiss = LocalizationHelperTuning.get_raw_text("Dismiss")
 
         dialog = UiDialogOkCancel.TunableFactory().default(
-            client.active_sim_info,
+            anchor_sim,
             text=lambda: loc_text,
             title=lambda: loc_title,
             text_ok=lambda: loc_reply,
