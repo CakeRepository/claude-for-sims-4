@@ -139,6 +139,9 @@ Rules:
 - Sims primarily reference people who LIVE IN THEIR OWN WORLD. The caller should mostly \
   talk about sims who share their world. Only mention out-of-world sims occasionally, and \
   when you do, frame it as long-distance (text/call/social media), never in-person.
+- NEVER invent names of sims. ONLY use the names listed in the mutual contacts block. \
+  If you need to reference someone not on that list, use a generic role like 'my coworker', \
+  'my neighbor', 'this friend of mine', 'a guy I know' — never a fabricated name.
 - Write dialogue lines only, prefixed with the caller's first name
 - NEVER break character. NEVER say you don't have information or need more details. \
   You are the sim — always stay in character and improvise. If someone mentions a person \
@@ -213,6 +216,8 @@ Rules:
 - Sims primarily reference people who LIVE IN THEIR OWN WORLD. Mostly talk about sims who \
   share the sender's world. Only mention out-of-world sims occasionally, and when you do, \
   frame it as long-distance (text/call/social media), never in-person.
+- NEVER invent names of sims. ONLY use the names listed in the mutual contacts block. \
+  For others, use generic roles like 'my coworker' or 'this friend of mine'.
 - NEVER break character. NEVER say you don't have information, can't roleplay, or need more details. \
   You are the sim — always stay in character and improvise naturally. If someone mentions a person \
   or event you weren't given details about, react like the sim would (curious, gossipy, confused, etc.) \
@@ -925,8 +930,10 @@ def generate_call(callback=None, output=None):
     mutuals = _get_mutual_contacts(contact)
     mutual_block = ""
     if mutuals:
-        mutual_block = "\n\nPeople you both know:\n" + "\n".join(f"  - {m}" for m in mutuals)
-        mutual_block += "\nFeel free to gossip about, mention, or bring up any of these sims naturally."
+        mutual_block = "\n\nPeople BOTH of you know (these are the ONLY mutual sims you can reference by name):\n" + "\n".join(f"  - {m}" for m in mutuals)
+        mutual_block += "\nFeel free to gossip about, mention, or bring up any of these sims naturally. \
+DO NOT invent any other sim names — if you need to reference someone not on this list, \
+use a generic reference like 'a coworker', 'my neighbor', 'this friend of mine' instead."
 
     protag_rels = _get_protagonist_relationships()
     protag_block = f"\n\n{protag_rels}" if protag_rels else ""
@@ -992,8 +999,10 @@ def generate_text(callback=None, output=None):
     mutuals = _get_mutual_contacts(contact)
     mutual_block = ""
     if mutuals:
-        mutual_block = "\n\nPeople you both know:\n" + "\n".join(f"  - {m}" for m in mutuals)
-        mutual_block += "\nFeel free to gossip about, mention, or bring up any of these sims naturally."
+        mutual_block = "\n\nPeople BOTH of you know (these are the ONLY mutual sims you can reference by name):\n" + "\n".join(f"  - {m}" for m in mutuals)
+        mutual_block += "\nFeel free to gossip about, mention, or bring up any of these sims naturally. \
+DO NOT invent any other sim names — if you need to reference someone not on this list, \
+use a generic reference like 'a coworker', 'my neighbor', 'this friend of mine' instead."
 
     protag_rels = _get_protagonist_relationships()
     protag_block = f"\n\n{protag_rels}" if protag_rels else ""
@@ -1072,7 +1081,8 @@ def generate_reply(player_message, callback=None, output=None):
     mutuals = _get_mutual_contacts(contact)
     mutual_block = ""
     if mutuals:
-        mutual_block = "\n\nPeople you both know:\n" + "\n".join(f"  - {m}" for m in mutuals)
+        mutual_block = "\n\nPeople BOTH of you know (the ONLY mutual sims you can name):\n" + "\n".join(f"  - {m}" for m in mutuals)
+        mutual_block += "\nDO NOT invent other sim names — use generic references like 'a coworker' if needed."
 
     protag_rels = _get_protagonist_relationships()
     protag_block = f"\n\n{protag_rels}" if protag_rels else ""
@@ -1141,7 +1151,8 @@ def send_text(contact, player_message, callback=None, output=None):
     mutuals = _get_mutual_contacts(contact)
     mutual_block = ""
     if mutuals:
-        mutual_block = "\n\nPeople you both know:\n" + "\n".join(f"  - {m}" for m in mutuals)
+        mutual_block = "\n\nPeople BOTH of you know (the ONLY mutual sims you can name):\n" + "\n".join(f"  - {m}" for m in mutuals)
+        mutual_block += "\nDO NOT invent other sim names — use generic references like 'a coworker' if needed."
 
     protag_rels = _get_protagonist_relationships()
     protag_block = f"\n\n{protag_rels}" if protag_rels else ""
@@ -1205,7 +1216,8 @@ def send_call(contact, player_topic, callback=None, output=None):
     mutuals = _get_mutual_contacts(contact)
     mutual_block = ""
     if mutuals:
-        mutual_block = "\n\nPeople you both know:\n" + "\n".join(f"  - {m}" for m in mutuals)
+        mutual_block = "\n\nPeople BOTH of you know (the ONLY mutual sims you can name):\n" + "\n".join(f"  - {m}" for m in mutuals)
+        mutual_block += "\nDO NOT invent other sim names — use generic references like 'a coworker' if needed."
 
     protag_rels = _get_protagonist_relationships()
     protag_block = f"\n\n{protag_rels}" if protag_rels else ""
