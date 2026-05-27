@@ -16,6 +16,10 @@ Your events and challenges must:
 - ONLY reference skills, aspirations, careers, and traits that are listed in the game context. \
   Do NOT invent skill names or aspiration milestones that don't exist in The Sims 4.
 - If a sim already has a high skill level, don't suggest leveling that skill — suggest something new.
+- NEVER assume the sim has a status not shown in the context. Do NOT invent reputation, \
+  fame level, satisfaction, money problems, relationship drama, or any other game state \
+  that isn't explicitly listed. If reputation/fame isn't mentioned, assume neutral. \
+  If money isn't mentioned as a problem, don't say they're broke. Stick to what's given.
 - Write in {language}
 
 IMPORTANT: On the very last line of your response, write MOOD: followed by the emotional \
