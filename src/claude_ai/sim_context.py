@@ -181,11 +181,20 @@ def _read_relationship_for_target(rt, target_sim_id, sim_manager):
     except Exception:
         pass
 
-    # Filter out romantic bits if romance score is 0 (game keeps stale bits sometimes)
+    # If any bit indicates the relationship is now platonic ("Just Friends" etc.),
+    # treat the whole relationship as platonic and strip all romantic bits.
+    is_platonic_now = False
+    for bn in raw_bits:
+        bn_low = bn.lower().replace("_", "")
+        if "justfriends" in bn_low or "justgoodfriends" in bn_low or "platonic" in bn_low:
+            is_platonic_now = True
+            break
+
+    # Filter out romantic bits if platonic-now is set OR romance score is 0
     bit_labels = []
     for bn in raw_bits:
         is_romantic = any(kw in bn for kw in _ROMANTIC_BITS)
-        if is_romantic and romance == 0:
+        if is_romantic and (is_platonic_now or romance == 0):
             continue
         label = (bn.replace("RelationshipBit_", "")
                    .replace("Romantic_", "")

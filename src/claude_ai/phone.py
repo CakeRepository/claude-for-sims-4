@@ -355,6 +355,45 @@ def _pick_random_relationship_sim():
     return random.choices(contacts, weights=weights, k=1)[0]
 
 
+# Bits that signal a relationship is platonic (no longer romantic).
+# Sims 4 adds these when a romance ends — they override any lingering romantic bits.
+_PLATONIC_BIT_KEYWORDS = ("justfriends", "justgoodfriends", "platonic")
+# Bits that indicate ACTIVE romance (vs historical romantic bits)
+_ACTIVE_ROMANCE_BIT_KEYWORDS = (
+    "married", "spouse", "engaged", "fiance",
+    "soulmate", "significant_other", "significantother",
+    "boyfriend", "girlfriend", "partner",
+)
+
+
+def _has_platonic_bit(bits):
+    """Return True if any bit indicates the relationship is now platonic."""
+    if not bits:
+        return False
+    for bit in bits:
+        try:
+            bn = sim_context._get_trait_name(bit).lower().replace("_", "")
+            if any(kw in bn for kw in _PLATONIC_BIT_KEYWORDS):
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def _has_active_romance_bit(bits):
+    """Return True if any bit indicates an active romantic relationship."""
+    if not bits:
+        return False
+    for bit in bits:
+        try:
+            bn = sim_context._get_trait_name(bit).lower().replace("_", "")
+            if any(kw in bn for kw in _ACTIVE_ROMANCE_BIT_KEYWORDS):
+                return True
+        except Exception:
+            pass
+    return False
+
+
 def _get_mutual_contacts(contact):
     """
     Find sims that both the protagonist and the contact have relationships with.
@@ -395,8 +434,15 @@ def _get_mutual_contacts(contact):
                 # Get relationship bits from protagonist's perspective
                 main_bits = []
                 try:
-                    for bit in main_rt.get_all_bits(sid):
+                    raw_main_bits = list(main_rt.get_all_bits(sid))
+                    main_is_platonic = _has_platonic_bit(raw_main_bits)
+                    for bit in raw_main_bits:
                         bn = sim_context._get_trait_name(bit)
+                        bn_low = bn.lower().replace("_", "")
+                        # Skip historical romantic bits when relationship is now platonic
+                        is_romantic = any(kw in bn_low for kw in ("romantic", "crush", "lover"))
+                        if is_romantic and main_is_platonic:
+                            continue
                         for kw in ("Friend", "Enemy", "Romantic", "Married", "BFF",
                                    "Crush", "Family", "Sibling", "Parent", "Child"):
                             if kw in bn:
@@ -409,8 +455,14 @@ def _get_mutual_contacts(contact):
                 # Get relationship bits from contact's perspective
                 other_bits = []
                 try:
-                    for bit in other_rt.get_all_bits(sid):
+                    raw_other_bits = list(other_rt.get_all_bits(sid))
+                    other_is_platonic = _has_platonic_bit(raw_other_bits)
+                    for bit in raw_other_bits:
                         bn = sim_context._get_trait_name(bit)
+                        bn_low = bn.lower().replace("_", "")
+                        is_romantic = any(kw in bn_low for kw in ("romantic", "crush", "lover"))
+                        if is_romantic and other_is_platonic:
+                            continue
                         for kw in ("Friend", "Enemy", "Romantic", "Married", "BFF",
                                    "Crush", "Family", "Sibling", "Parent", "Child"):
                             if kw in bn:
@@ -729,26 +781,44 @@ def _get_protagonist_relationships():
             other_name = other_si.first_name + " " + other_si.last_name
 
             try:
-                bits = rt.get_all_bits(target_id)
+                bits = list(rt.get_all_bits(target_id))
                 if not bits:
                     continue
+                # Pre-scan: is this relationship now platonic, or actively romantic?
+                is_platonic = _has_platonic_bit(bits)
+                has_active_romance = _has_active_romance_bit(bits)
+                # Build the lowercased bit name list once
+                bit_names = []
                 for bit in bits:
-                    bn = sim_context._get_trait_name(bit).lower()
+                    try:
+                        bit_names.append(sim_context._get_trait_name(bit).lower())
+                    except Exception:
+                        pass
+
+                # Priority: spouse > parent/child/sibling > active romance > nothing
+                # Historical romantic bits are IGNORED when there's a platonic bit
+                # or when the relationship has no active-romance signal.
+                added = False
+                for bn in bit_names:
                     if "spouse" in bn or "married" in bn:
                         facts.append(main_name + " is married to " + other_name)
+                        added = True
                         break
                     elif "parent" in bn:
                         facts.append(main_name + " is " + other_name + "'s parent")
+                        added = True
                         break
                     elif "child" in bn or "offspring" in bn:
                         facts.append(main_name + " is " + other_name + "'s child")
+                        added = True
                         break
                     elif "sibling" in bn:
                         facts.append(main_name + " and " + other_name + " are siblings")
+                        added = True
                         break
-                    elif "romantic" in bn and "married" not in bn:
-                        facts.append(main_name + " is in a romantic relationship with " + other_name)
-                        break
+
+                if not added and has_active_romance and not is_platonic:
+                    facts.append(main_name + " is in a romantic relationship with " + other_name)
             except Exception:
                 pass
 
