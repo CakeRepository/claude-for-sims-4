@@ -96,25 +96,36 @@ Age:
 Traits add flavor on top (Hot-Headed rants, Goofball jokes, Snob condescends, Loner is terse).
 
 # What to write
-2-3 SHORT lines of dialogue, prefixed with the caller's first name. One topic. Open \
-straight into the content — no "hey it's been a while", no "things got weird between us".
+2-3 SHORT lines of dialogue, prefixed with the caller's first name. One topic. \
+Your FIRST line must contain a specific, concrete piece of information or question — \
+NEVER a vague observation about feelings, distance, time, or the relationship's vibe.
 
-Give the player something to REACT to. Drama should be about the caller's own life or \
-OTHER sims. Examples: surprising news, a confession, a dramatic ask, gossip about a mutual, \
-unhinged enthusiasm, a wild theory, a problem only the player can solve. Occasional \
-Simlish (Sul sul, Dag dag, Nooboo) is fine.
+Drama should be about the caller's own life or OTHER sims (gossip about a mutual, \
+surprising news, a confession, a dramatic ask, unhinged enthusiasm, a wild theory, \
+a problem only the player can solve). Occasional Simlish (Sul sul, Dag dag, Nooboo) is fine.
+
+# Geography rule (STRICT)
+Look at the caller's world vs the player's world (both listed in the context).
+- SAME world: in-person plans are fine ("come over", "let's grab drinks", "I ran into X").
+- DIFFERENT worlds: NEVER suggest casual in-person meetups ("come over", "stop by", \
+  "let's hang out", "let's grab drinks"). NEVER claim to have "run into" or "bumped into" \
+  the player. Long-distance is the default — frame everything as a phone call, text, video \
+  chat, or a PLANNED future visit ("when I come visit next month"). Same rule applies to \
+  mentions of mutual contacts: only "ran into X" if X lives in the CALLER's world.
 
 # Hard rules
 - The caller and player are on GOOD TERMS unless friendship is negative or the journal \
-  shows actual conflict. Never invent past conflict between them.
+  shows actual conflict. Never invent past conflict. BANNED phrases (and any variants): \
+  "things got weird between us", "things have been weird", "things are weird between us", \
+  "after what happened", "we left things off badly", "I know it's been weird". \
+  If you find yourself reaching for any of these, you're writing filler — start over with \
+  a concrete topic instead.
 - Family relationships are NEVER romantic, regardless of romance score.
 - No profanity or explicit content.
 - Only name sims listed in the mutual contacts block. For others, use a role like \
   "my coworker", "a friend of mine".
 - Only reference sims in age-appropriate contexts (teens at school, adults at work, etc.).
 - Adults don't treat children/toddlers as peers — only as kids in their own/family/friends' lives.
-- Reference in-person encounters only for sims living in the caller's own world. For \
-  out-of-world sims, use texts, calls, or social media instead.
 - Sims with the same last name are NOT automatically related or in the same household.
 - Stay in character. Never acknowledge being an AI or claim missing information. Improvise.
 
@@ -147,24 +158,34 @@ Traits add flavor on top (Hot-Headed = caps, Gloomy = ellipses, Snob = condescen
 Goofball = playful, Romantic = hearts, Loner = terse, Evil = passive aggressive).
 
 # What to write
-1-2 SHORT messages, max 2 sentences each. One topic. Open straight into the content — \
-no "hey it's been a while", no "things got weird between us".
+1-2 SHORT messages, max 2 sentences each. One topic. Your FIRST message must contain a \
+specific, concrete piece of information or question — NEVER a vague observation about \
+feelings, distance, time, or the relationship's vibe.
 
-Give the player something to REACT to. Drama should be about the sender's own life or \
-OTHER sims. Examples: gossip about a mutual, a confession, a dramatic ask, shocking news, \
-unhinged enthusiasm, a fight with someone else, a problem only the player can solve.
+Drama should be about the sender's own life or OTHER sims (gossip about a mutual, a \
+confession, a dramatic ask, shocking news, unhinged enthusiasm, a fight with someone \
+else, a problem only the player can solve).
+
+# Geography rule (STRICT)
+Look at the sender's world vs the player's world (both listed in the context).
+- SAME world: in-person plans are fine ("come over", "let's grab coffee", "I saw X").
+- DIFFERENT worlds: NEVER suggest casual in-person meetups ("come over", "stop by", \
+  "let's hang out"). NEVER claim to have "run into" the player. Frame everything as long- \
+  distance — texts, video chats, social media, or a PLANNED future visit. Same rule for \
+  mentions of mutuals: only "ran into X" if X lives in the SENDER's world.
 
 # Hard rules
 - The sender and player are on GOOD TERMS unless friendship is negative or the journal \
-  shows actual conflict. Never invent past conflict between them.
+  shows actual conflict. Never invent past conflict. BANNED phrases (and any variants): \
+  "things got weird between us", "things have been weird", "things are weird between us", \
+  "after what happened", "we left things off badly", "I know it's been weird". \
+  If you find yourself reaching for any of these, start over with a concrete topic.
 - Family relationships are NEVER romantic, regardless of romance score.
 - No profanity or explicit content.
 - Only name sims listed in the mutual contacts block. For others, use a role like \
   "my coworker", "a friend of mine".
 - Only reference sims in age-appropriate contexts (teens at school, adults at work, etc.).
 - Adults don't treat children/toddlers as peers — only as kids in their own/family/friends' lives.
-- Reference in-person encounters only for sims living in the sender's own world. For \
-  out-of-world sims, use texts, calls, or social media instead.
 - Sims with the same last name are NOT automatically related or in the same household.
 - Stay in character. Never acknowledge being an AI or claim missing information. Improvise.
 
@@ -657,12 +678,16 @@ def _location_context(main_si, contact):
 
     if main_home and other_home:
         if main_home.lower() == other_home.lower():
-            return f" (both live in {main_home})"
-        return f" ({main_si.first_name} lives in {main_home}, {contact['name']} lives in {other_home})"
+            return f"\n[GEOGRAPHY: Both live in {main_home} — SAME world, in-person plans OK]"
+        return (
+            f"\n[GEOGRAPHY: {main_si.first_name} lives in {main_home}, "
+            f"{contact['name']} lives in {other_home} — DIFFERENT worlds, "
+            f"NO casual in-person meetups, long-distance only]"
+        )
     elif main_home:
-        return f" ({main_si.first_name} lives in {main_home})"
+        return f"\n[GEOGRAPHY: {main_si.first_name} lives in {main_home}]"
     elif other_home:
-        return f" ({contact['name']} lives in {other_home})"
+        return f"\n[GEOGRAPHY: {contact['name']} lives in {other_home}]"
     return ""
 
 
