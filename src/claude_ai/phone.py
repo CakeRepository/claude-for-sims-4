@@ -932,8 +932,8 @@ def _get_family_relationship(other_si, contact, recipient=None):
     def male_or(male_label, female_label):
         return male_label if is_male else female_label
 
-    # Age sanity: if the OTHER sim is younger than main, they can't be a parent or
-    # grandparent of main. If older, they can't be a child or grandchild.
+    # Age sanity: a sim can never be the parent of someone the same age or older,
+    # nor the child of someone the same age or younger.
     main_rank = _age_rank(main_si)
     other_rank = _age_rank(other_si)
     other_can_be_parent_of_main = (
@@ -941,6 +941,14 @@ def _get_family_relationship(other_si, contact, recipient=None):
     )
     other_can_be_child_of_main = (
         main_rank is None or other_rank is None or other_rank <= main_rank
+    )
+    # Strict comparators — used to flip direction when bits know a relationship
+    # exists but can't tell us who's the parent.
+    other_is_older = (
+        main_rank is not None and other_rank is not None and other_rank > main_rank
+    )
+    other_is_younger = (
+        main_rank is not None and other_rank is not None and other_rank < main_rank
     )
 
     # Try genealogy tracker first — most precise. Walks up to 2 generations.
@@ -1106,14 +1114,23 @@ def _get_family_relationship(other_si, contact, recipient=None):
                 return male_or("Husband", "Wife")
             if any_bit("sibling", "brother", "sister"):
                 return male_or("Brother", "Sister")
-            # Generic parent/child LAST — exclude grandparent AND in-law substrings,
-            # and gate by age so we don't claim a younger sim is a parent.
-            if any_bit("parent") and not any_bit("grandparent") and not has_compact("inlaw") \
-                    and other_can_be_parent_of_main:
-                return male_or("Father", "Mother")
-            if (any_bit("offspring") or any(("child" in bn and "grandchild" not in bn) for bn in bit_names)) \
-                    and not has_compact("inlaw") and other_can_be_child_of_main:
-                return male_or("Son", "Daughter")
+            # Generic parent/child LAST — the bit only tells us a parent-child
+            # relationship exists; it doesn't tell us who's the parent. Use age
+            # to determine direction (a younger sim is the child, older is the parent).
+            parent_child_bit = (
+                any_bit("parent")
+                and not any_bit("grandparent")
+                and not has_compact("inlaw")
+            ) or (
+                (any_bit("offspring") or any(("child" in bn and "grandchild" not in bn) for bn in bit_names))
+                and not has_compact("inlaw")
+            )
+            if parent_child_bit:
+                if other_is_older:
+                    return male_or("Father", "Mother")
+                if other_is_younger:
+                    return male_or("Son", "Daughter")
+                # Same age or unknown — direction can't be inferred; skip rather than guess
     except Exception:
         pass
 
