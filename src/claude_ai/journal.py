@@ -139,15 +139,16 @@ def get_entry_count():
 def get_sim_history(sim_name, n=6, recipient_name=None):
     """
     Return recent journal entries involving a specific sim.
-    If recipient_name is given, only return entries where that household sim
-    received the message — keeps history clean per-conversation-pair.
+    If recipient_name is given, ONLY return entries explicitly tagged with that
+    recipient — legacy entries without a recipient field are excluded to prevent
+    cross-recipient contamination (e.g. old texts addressed to one sim leaking
+    into prompts for another).
     """
     entries = _load()
     matched = [e for e in entries if e.get("sim", "").lower() == sim_name.lower()]
     if recipient_name:
         rn = recipient_name.lower()
-        # Only include entries with no recipient field (legacy/general) OR matching recipient
-        matched = [e for e in matched if (not e.get("recipient")) or e.get("recipient", "").lower() == rn]
+        matched = [e for e in matched if e.get("recipient", "").lower() == rn]
     return matched[-n:]
 
 
