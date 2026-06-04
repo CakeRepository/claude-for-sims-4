@@ -168,6 +168,11 @@ Look at the caller's world vs the player's world (both listed in the context).
 - Adults don't treat children/toddlers as peers — only as kids in their own/family/friends' lives.
 - Sims with the same last name are NOT automatically related or in the same household.
 - Stay in character. Never acknowledge being an AI or claim missing information. Improvise.
+- PLAY ALONG with the player. If the player references things you don't have data for \
+  (companies, hobbies, events, side businesses, mods, etc.), treat them as canon and \
+  respond as if you know them. NEVER push back, correct, or say "I think you have me \
+  confused" — the player is driving the story. If unsure, ask a curious in-character \
+  question instead of disputing the premise.
 
 # Output format (STRICT)
 PLAIN TEXT ONLY. No markdown. No `**bold**`, no `*italics*`, no `_emphasis_`, no headings, \
@@ -258,6 +263,11 @@ Look at the sender's world vs the player's world (both listed in the context).
 - Adults don't treat children/toddlers as peers — only as kids in their own/family/friends' lives.
 - Sims with the same last name are NOT automatically related or in the same household.
 - Stay in character. Never acknowledge being an AI or claim missing information. Improvise.
+- PLAY ALONG with the player. If the player references things you don't have data for \
+  (companies, hobbies, events, side businesses, mods, etc.), treat them as canon and \
+  respond as if you know them. NEVER push back, correct, or say "I think you have me \
+  confused" — the player is driving the story. If unsure, ask a curious in-character \
+  question instead of disputing the premise.
 
 # Output format (STRICT)
 PLAIN TEXT ONLY. No markdown. No `**bold**`, no `*italics*`, no `_emphasis_`, no headings, \
@@ -293,6 +303,10 @@ character (curious, confused, gossipy) — never refuse or ask for details.
 - No profanity or explicit content.
 - Don't assume same last name = related or in same household.
 - Stay in character. Never acknowledge being an AI or claim missing information.
+- PLAY ALONG with the player. If {main_name} references things you don't have data for \
+  (companies, hobbies, events, side businesses, etc.), treat them as canon. \
+  NEVER push back, correct, or say "I think you have me confused" — the player is driving \
+  the story. Roll with it, ask curious in-character questions if needed.
 
 # Output format (STRICT)
 PLAIN TEXT ONLY. No markdown, no `**bold**`, no `---` separators, no "Message 1:" labels.
@@ -583,6 +597,10 @@ def _describe_recipient(recipient_sim, contact=None):
     traits = sim_context.get_sim_traits(recipient_sim, limit=4)
     if traits:
         parts.append(f"{recipient_sim.first_name}'s traits: {', '.join(traits)}")
+
+    clubs = sim_context.get_sim_clubs(recipient_sim)
+    if clubs:
+        parts.append(f"{recipient_sim.first_name}'s clubs: {', '.join(clubs)}")
 
     # Household members the recipient lives with — so Claude knows about kids/spouses/etc
     # who might come up in conversation but aren't in the contact's relationship tracker.
@@ -1225,6 +1243,10 @@ def _describe_relationship(contact, recipient=None):
         aspiration = sim_context.get_sim_aspiration(si)
         if aspiration:
             parts.append(f"{name}'s aspiration: {aspiration}")
+
+        clubs = sim_context.get_sim_clubs(si)
+        if clubs:
+            parts.append(f"{name}'s clubs: {', '.join(clubs)}")
 
         home = _get_sim_home_world(si)
         if home:

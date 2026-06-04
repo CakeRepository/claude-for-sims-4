@@ -514,6 +514,67 @@ def get_sim_career(sim_info):
     return None
 
 
+def get_sim_clubs(sim_info, limit=4):
+    """Return a list of club names the sim is a member of (Get Together packs)."""
+    clubs = []
+    if not sim_info:
+        return clubs
+    try:
+        import services
+        club_service = services.get_club_service()
+        if not club_service:
+            return clubs
+        sid = getattr(sim_info, "sim_id", None)
+        # The service exposes clubs via .clubs or a generator; try both
+        all_clubs = None
+        try:
+            all_clubs = list(club_service.clubs)
+        except Exception:
+            try:
+                all_clubs = list(getattr(club_service, "_clubs", {}).values())
+            except Exception:
+                pass
+        if not all_clubs:
+            return clubs
+        for club in all_clubs:
+            try:
+                members = getattr(club, "members", None) or []
+                # Check membership both ways (sim_info object, or sim_id)
+                member_ids = set()
+                for m in members:
+                    mid = getattr(m, "sim_id", None) or getattr(getattr(m, "sim_info", None), "sim_id", None)
+                    if mid:
+                        member_ids.add(mid)
+                if sid is not None and sid not in member_ids:
+                    continue
+                # Get the club name — could be a localized string or a raw name
+                name = None
+                try:
+                    cname = getattr(club, "name", None)
+                    if cname:
+                        # Try to resolve a localized string
+                        try:
+                            from sims4.localization import LocalizationHelperTuning
+                            name = LocalizationHelperTuning.get_raw_text(str(cname))
+                        except Exception:
+                            name = str(cname)
+                except Exception:
+                    pass
+                if not name:
+                    name = type(club).__name__
+                # Clean up tuning-prefix-style names
+                name = str(name).strip()
+                if name and name not in clubs:
+                    clubs.append(name)
+                    if len(clubs) >= limit:
+                        break
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return clubs
+
+
 def get_sim_aspiration(sim_info):
     """Return the sim's current aspiration name, or None for tutorial/placeholder ones."""
     try:
