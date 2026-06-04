@@ -470,6 +470,36 @@ def find_contact_by_name(full_name):
     return None
 
 
+def _is_age_appropriate_contact(contact, recipient):
+    """
+    Filter out implausible cross-generational acquaintance pairings.
+    Teens don't randomly chat-text their friend's adult parents, and adults
+    don't randomly chat-text their kid's teen friends. Such pairs exist in
+    the relationship tracker (they've met) but they're not natural texters
+    unless they're family OR have a genuinely close friendship.
+    """
+    contact_si = contact.get("sim_info")
+    if not contact_si or not recipient:
+        return True
+    c_rank = _age_rank(contact_si)
+    r_rank = _age_rank(recipient)
+    if c_rank is None or r_rank is None:
+        return True
+    # Same or adjacent age stage — always plausible
+    if abs(c_rank - r_rank) <= 1:
+        return True
+    # Family — always allowed (parent calling child, grandparent calling grandkid, etc.)
+    family_label = _get_family_relationship(contact_si, contact, recipient=recipient)
+    if family_label:
+        return True
+    # Cross-generational non-family — only allow if they're genuinely close
+    friendship = abs(contact.get("friendship") or 0)
+    romance = abs(contact.get("romance") or 0)
+    if friendship >= 50 or romance >= 50:
+        return True
+    return False
+
+
 def _pick_random_relationship_sim(recipient=None):
     """Pick a random non-household sim from the recipient's relationship network.
     If no recipient passed, falls back to protagonist."""
@@ -493,6 +523,10 @@ def _pick_random_relationship_sim(recipient=None):
     on_lot = _get_sims_on_active_lot()
     if on_lot:
         contacts = [c for c in contacts if c.get("sim_id") not in on_lot]
+
+    # Filter out implausible cross-generational acquaintance pairings
+    if recipient is not None:
+        contacts = [c for c in contacts if _is_age_appropriate_contact(c, recipient)]
 
     if not contacts:
         return None
