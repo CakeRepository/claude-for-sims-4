@@ -164,7 +164,10 @@ Look at the caller's world vs the player's world (both listed in the context).
 - No profanity or explicit content.
 - Only name sims listed in the mutual contacts block. For others, use a role like \
   "my coworker", "a friend of mine".
-- Only reference sims in age-appropriate contexts (teens at school, adults at work, etc.).
+- Only reference sims in age- AND season-appropriate contexts. Teens are at school \
+  during Spring/Fall/Winter but NOT in Summer. Adults at work apply year-round (unless \
+  it's a holiday). Don't write summer-vacation messages in winter, or school messages in \
+  summer. The [SEASON: ...] tag below tells you what to assume.
 - Adults don't treat children/toddlers as peers — only as kids in their own/family/friends' lives.
 - Sims with the same last name are NOT automatically related or in the same household.
 - Stay in character. Never acknowledge being an AI or claim missing information. Improvise.
@@ -259,7 +262,10 @@ Look at the sender's world vs the player's world (both listed in the context).
 - No profanity or explicit content.
 - Only name sims listed in the mutual contacts block. For others, use a role like \
   "my coworker", "a friend of mine".
-- Only reference sims in age-appropriate contexts (teens at school, adults at work, etc.).
+- Only reference sims in age- AND season-appropriate contexts. Teens are at school \
+  during Spring/Fall/Winter but NOT in Summer. Adults at work apply year-round (unless \
+  it's a holiday). Don't write summer-vacation messages in winter, or school messages in \
+  summer. The [SEASON: ...] tag below tells you what to assume.
 - Adults don't treat children/toddlers as peers — only as kids in their own/family/friends' lives.
 - Sims with the same last name are NOT automatically related or in the same household.
 - Stay in character. Never acknowledge being an AI or claim missing information. Improvise.
@@ -943,6 +949,21 @@ def _get_sim_home_world(sim_info):
     return None
 
 
+def _season_context():
+    """Return a season context block (or empty string if Seasons not installed)."""
+    season = sim_context.get_current_season()
+    if not season:
+        return ""
+    hints = {
+        "Spring": "warming up, rain showers, flowers, fresh starts",
+        "Summer": "hot, sunny, school is OUT for teens/children, vacation vibes, pool weather",
+        "Fall":   "cooling down, leaves changing, school is in session, cozy/spooky vibes",
+        "Winter": "cold, snow, school is in session (with breaks for holidays), holidays",
+    }
+    hint = hints.get(season, "")
+    return f"\n[SEASON: {season}{' — ' + hint if hint else ''}]"
+
+
 def _location_context(main_si, contact):
     """Build a short string describing where each sim lives, if known."""
     main_home = _get_sim_home_world(main_si) if main_si else None
@@ -1435,7 +1456,7 @@ use a generic reference like 'a coworker', 'my neighbor', 'this friend of mine' 
     prompt = (
         f"Caller info:\n{rel_desc}{history_block}{mutual_block}\n\n"
         f"{recipient_block}\n\n"
-        f"They are calling {recipient_name}{_location_context(recipient, contact)}.\n\n"
+        f"They are calling {recipient_name}{_location_context(recipient, contact)}.{_season_context()}\n\n"
         f"Write what {contact['name']} says during this phone call."
     )
 
@@ -1507,7 +1528,7 @@ use a generic reference like 'a coworker', 'my neighbor', 'this friend of mine' 
     prompt = (
         f"Sender info:\n{rel_desc}{history_block}{mutual_block}\n\n"
         f"{recipient_block}\n\n"
-        f"They are texting {recipient_name}{_location_context(recipient, contact)}.\n\n"
+        f"They are texting {recipient_name}{_location_context(recipient, contact)}.{_season_context()}\n\n"
         f"Write 1-2 short text messages from {contact['name']}."
     )
 

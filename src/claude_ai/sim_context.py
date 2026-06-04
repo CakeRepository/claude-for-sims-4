@@ -514,6 +514,36 @@ def get_sim_career(sim_info):
     return None
 
 
+def get_current_season():
+    """Return the current season name (Spring/Summer/Fall/Winter), or None if Seasons isn't installed."""
+    try:
+        import services
+        season_service = services.season_service()
+        if not season_service:
+            return None
+        # Try a few common APIs
+        season = None
+        for attr in ("season", "_season", "current_season"):
+            season = getattr(season_service, attr, None)
+            if season is not None:
+                break
+        if season is None:
+            try:
+                season = season_service.get_season()
+            except Exception:
+                pass
+        if season is None:
+            return None
+        # Convert enum to readable name
+        name = str(season).split(".")[-1].title()
+        # Common Sims 4 season enum values: SPRING, SUMMER, FALL, WINTER
+        mapping = {"Spring": "Spring", "Summer": "Summer", "Fall": "Fall", "Winter": "Winter",
+                   "Autumn": "Fall"}
+        return mapping.get(name, name)
+    except Exception:
+        return None
+
+
 def get_sim_clubs(sim_info, limit=4):
     """Return a list of club names the sim is a member of (Get Together packs)."""
     clubs = []
