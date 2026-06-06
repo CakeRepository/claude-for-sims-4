@@ -18,8 +18,15 @@ Your events and challenges must:
 - If a sim already has a high skill level, don't suggest leveling that skill — suggest something new.
 - NEVER assume the sim has a status not shown in the context. Do NOT invent reputation, \
   fame level, satisfaction, money problems, relationship drama, or any other game state \
-  that isn't explicitly listed. If reputation/fame isn't mentioned, assume neutral. \
-  If money isn't mentioned as a problem, don't say they're broke. Stick to what's given.
+  that isn't explicitly listed.
+- Only name sims explicitly listed in the context. For anyone else, use generic references like \
+  'a coworker', 'a neighbour' — never fabricate sim names.
+- DECEASED sims (marked [DECEASED]) are ghosts. Don't suggest the player visit, call, or hang \
+  out with them. Mention them only as memories, ghosts haunting the lot, or family legacy.
+- Honour the current location and season — don't suggest a pool party in winter, or a school \
+  fundraiser in summer, or visiting a sim's home when they're on vacation elsewhere.
+- NEVER acknowledge being an AI or break the fourth wall. Play along with the player.
+- Plain text output ONLY. No markdown.
 - Write in {language}
 
 IMPORTANT: On the very last line of your response, write MOOD: followed by the emotional \
@@ -141,7 +148,7 @@ def generate_challenge(difficulty="medium", callback=None):
 
 def generate_weekly_goals(callback=None):
     """
-    Generate a set of 5 goals for the player to accomplish this play session.
+    Generate 3 short goals for the player to accomplish this play session.
     """
     context = sim_context.build_context_string_with_journal()
     language = config.get_language()
@@ -149,7 +156,10 @@ def generate_weekly_goals(callback=None):
 
     prompt = (
         f"{context}\n\n"
-        "Generate 3 fun goals for this play session. Keep each one SHORT (1 line).\n\n"
+        "Generate 3 fun goals for this play session, tailored to THESE sims and their actual "
+        "current state. Keep each one SHORT (1 line). Goals should reference traits, careers, "
+        "skills, aspirations, or household members ACTUALLY listed above — not invented ones. "
+        "Don't suggest skills the sim has already maxed.\n\n"
         "Must fit in a small popup window.\n\n"
         "Format as:\n"
         "GOALS:\n"

@@ -828,6 +828,34 @@ def _format_rel_entry(r):
     return line
 
 
+def _is_sim_ghost(sim_info):
+    """True if the sim is a ghost / deceased. Best-effort, tries multiple APIs."""
+    if not sim_info:
+        return False
+    try:
+        ig = getattr(sim_info, "is_ghost", None)
+        if ig is not None:
+            val = ig() if callable(ig) else ig
+            if val:
+                return True
+    except Exception:
+        pass
+    try:
+        if getattr(sim_info, "is_dead", False):
+            return True
+    except Exception:
+        pass
+    try:
+        death_type = getattr(sim_info, "death_type", None)
+        if death_type is not None:
+            dt_str = str(death_type)
+            if dt_str and "NONE" not in dt_str.upper():
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def build_context_string(sim=None):
     """
     Build a human-readable context string to include in prompts.
@@ -879,6 +907,8 @@ def build_context_string(sim=None):
                     m_line += f", traits: {', '.join(m_traits)}"
                 if m.get("status"):
                     m_line += f" [{m['status']}]"
+                if _is_sim_ghost(msi):
+                    m_line += " [DECEASED — only reference in past tense]"
                 lines.append(m_line)
 
         try:
@@ -893,11 +923,37 @@ def build_context_string(sim=None):
         if relationships:
             lines.append(f"\n{name}'s Relationships (outside household):")
             for r in relationships:
-                lines.append(_format_rel_entry(r))
+                entry = _format_rel_entry(r)
+                rsi = r.get("sim_info")
+                if rsi and _is_sim_ghost(rsi):
+                    entry += " [DECEASED — only reference in past tense]"
+                lines.append(entry)
 
-    lot = get_current_lot_name()
-    if lot:
-        lines.append(f"\nCurrent Location: {lot}")
+    # Current location vs home — flag if traveling/on vacation
+    current_world = get_current_world()
+    home_world = None
+    if focus_si:
+        try:
+            household = focus_si.household
+            if household and household.home_zone_id:
+                from world.region import get_region_instance_from_zone_id
+                region = get_region_instance_from_zone_id(household.home_zone_id)
+                if region:
+                    raw = getattr(region, "__name__", "") or str(region)
+                    home_world = raw.replace("Region_", "").replace("region_", "").replace("_", " ").strip()
+        except Exception:
+            pass
+    if current_world and home_world and current_world.lower() != home_world.lower():
+        lines.append(f"\nCURRENT LOCATION: {focus_si.first_name} is in {current_world} (on vacation — NOT at home in {home_world})")
+    else:
+        lot = get_current_lot_name()
+        if lot:
+            lines.append(f"\nCurrent Location: {lot}")
+
+    # Season for narrative consistency
+    season = get_current_season()
+    if season:
+        lines.append(f"Season: {season}")
 
     packs = get_installed_packs()
     if packs:

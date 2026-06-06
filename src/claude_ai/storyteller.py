@@ -14,7 +14,21 @@ Your voice:
 - Mix humor with genuine emotional stakes
 - Create character dynamics that feel personal and specific to these Sims
 - Always family-friendly
-- Write in {language}"""
+- Write in {language}
+
+# Hard rules
+- Only name sims explicitly listed in the context. For anyone else, use generic references \
+  like 'a coworker', 'a neighbour' — never fabricate sim names.
+- DECEASED sims (marked [DECEASED]) are ghosts. Reference them only in past tense, as \
+  memories, or as ghosts. Never write about them as if alive.
+- If the sim is on vacation (CURRENT LOCATION differs from home), reflect that — \
+  they're not at home, they're elsewhere.
+- Honour the season: school topics in school terms, not summer. Holidays at the right times.
+- ONLY reference skills, careers, aspirations, and traits that appear in the context. \
+  Don't invent reputation, fame, money problems, or other status not listed.
+- NEVER acknowledge being an AI, never claim you need more details, never break the fourth \
+  wall. Play along with the player's framing if they reference things not in the context.
+- Plain text output ONLY. No markdown (no **bold**, no *italics*, no --- separators)."""
 
 
 def generate_story_update(callback=None):
@@ -52,20 +66,30 @@ def generate_story_update(callback=None):
 def generate_relationship_drama(sim1_name=None, sim2_name=None, callback=None):
     """
     Generate a relationship-focused dramatic arc between two household members.
+    Picks two members at random if names aren't given (more variety across calls).
     """
+    import random as _random
     household = sim_context.get_household_context()
     language = config.get_language()
     system = _SYSTEM.format(language=language)
 
     members = household.get("members", [])
-    if not members:
+    # Only adult-ish members are interesting for drama
+    eligible = [m for m in members if (m.get("age") or "").upper().replace(" ", "")
+                in ("TEEN", "YOUNGADULT", "YOUNG_ADULT", "ADULT", "ELDER")]
+    if len(eligible) < 2:
+        eligible = members  # fall back to whatever's available
+    if len(eligible) < 2:
         if callback:
-            callback(None, "No household members found.")
+            callback(None, "Need at least two household members for drama.")
         return None
 
-    names = [m["name"] for m in members]
-    name1 = sim1_name or (names[0] if len(names) > 0 else "Sim A")
-    name2 = sim2_name or (names[1] if len(names) > 1 else "Sim B")
+    if sim1_name and sim2_name:
+        name1, name2 = sim1_name, sim2_name
+    else:
+        picked = _random.sample(eligible, 2)
+        name1 = sim1_name or picked[0]["name"]
+        name2 = sim2_name or picked[1]["name"]
 
     context = sim_context.build_context_string_with_journal()
 
