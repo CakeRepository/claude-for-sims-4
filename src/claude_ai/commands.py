@@ -118,6 +118,17 @@ try:
             auto_events.stop()
             output("[Claude AI] Auto-events turned OFF for this session.")
 
+    @sims4.commands.Command("claude.fire_auto", command_type=sims4.commands.CommandType.Live)
+    def cmd_fire_auto(_connection=None):
+        """Manually trigger the auto-event picker right now -- for diagnosing why nothing's firing."""
+        output = sims4.commands.CheatOutput(_connection)
+        if not _require_config(output):
+            return
+        output("[Claude AI] Firing auto-event now... check ClaudeAI_Log.txt for details.")
+        ok = auto_events.fire_now()
+        if not ok:
+            output("[Claude AI] fire_now() raised an exception -- see log.")
+
     # -------------------------------------------------------------------------
     # Dialogue
     # -------------------------------------------------------------------------

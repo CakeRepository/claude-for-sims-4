@@ -14,6 +14,8 @@ Config options (in claude_config.cfg):
   auto_event_types            = event,goals  (comma-separated: event, goals, story, drama)
 """
 
+import os
+import datetime
 import random
 import threading
 import time
@@ -23,6 +25,17 @@ from . import config, event_generator, storyteller, notifications, phone
 _thread = None
 _running = False
 _lock = threading.Lock()
+
+
+def _log(message):
+    """Write to ClaudeAI_Log.txt so we can diagnose silent failures."""
+    try:
+        path = os.path.join(os.path.expanduser("~"), "Documents", "ClaudeAI_Log.txt")
+        with open(path, "a", encoding="utf-8") as f:
+            ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            f.write(f"[{ts}] [auto_events] {message}\n")
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -79,21 +92,25 @@ def _is_game_paused():
     return False
 
 
-def _in_active_game():
-    """Return True only if the player is in a live, unpaused household."""
+def _active_game_reason():
+    """Return 'ok' if the game is in a state where we can fire, or a short string
+    explaining why not (for diagnostic logging)."""
     try:
         import services
-        if services.current_zone() is None:
-            return False
+        if services is None:
+            return "services-none"
+        zone = services.current_zone() if hasattr(services, "current_zone") else None
+        if zone is None:
+            return "no-zone"
         if services.active_household() is None:
-            return False
-        if services.current_zone().is_in_build_buy:
-            return False
+            return "no-active-household"
+        if getattr(zone, "is_in_build_buy", False):
+            return "build-buy"
         if _is_game_paused():
-            return False
-        return True
-    except Exception:
-        return False
+            return "paused"
+        return "ok"
+    except Exception as e:
+        return f"exception:{type(e).__name__}"
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +121,7 @@ def _pick_and_fire():
     """Choose a random event type using configured weights and fire it."""
     types = get_event_types()
     if not types:
+        _log("No event types configured -- nothing to fire.")
         return
 
     weights_map = get_event_weights()
@@ -115,12 +133,16 @@ def _pick_and_fire():
         w = [weights_map.get(t, 1) for t in weighted_types]
         chosen = random.choices(weighted_types, weights=w, k=1)[0]
     else:
-        # No weights configured — equal chance
         chosen = random.choice(types)
+
+    _log(f"Firing auto-event: {chosen}")
 
     def on_result(text, error):
         if error:
-            # Silent failure for auto-events — don't interrupt the player with errors
+            _log(f"{chosen} failed: {error}")
+            return
+        if not text:
+            _log(f"{chosen} returned empty -- no notification shown.")
             return
         label = {
             "event": "Random Event!",
@@ -129,6 +151,12 @@ def _pick_and_fire():
             "drama": "Household Drama",
         }.get(chosen, "Claude AI")
         notifications.show_result(label, text)
+
+    def phone_done(text, error):
+        if error:
+            _log(f"{chosen} failed: {error}")
+        elif not text:
+            _log(f"{chosen} silently produced no message (no recipient or no contact).")
 
     if chosen == "event":
         event_generator.generate_random_event(callback=on_result)
@@ -139,9 +167,11 @@ def _pick_and_fire():
     elif chosen == "drama":
         storyteller.generate_relationship_drama(callback=on_result)
     elif chosen == "call":
-        phone.generate_call()  # phone module handles its own notifications
+        phone.generate_call(callback=phone_done)
     elif chosen == "text":
-        phone.generate_text()  # phone module handles its own notifications
+        phone.generate_text(callback=phone_done)
+    else:
+        _log(f"Unknown event type: {chosen}")
 
 
 # ---------------------------------------------------------------------------
@@ -152,22 +182,36 @@ def _worker():
     """Sleeps for the configured interval, then maybe fires an event.
     Timer only ticks while the game is actively running (not paused)."""
     interval = get_interval_seconds()
-    # Stagger the first fire so it doesn't happen immediately on load
-    time.sleep(min(interval, 120))
+    _log(f"Auto-events worker started. Interval={interval/60:.1f} min, chance={get_chance()}%, types={get_event_types()}, weights={get_event_weights()}")
+
+    # Short initial delay -- just enough to let the game finish booting and the
+    # player land on their household. No long stagger; the player wants action.
+    time.sleep(10)
 
     while _running:
-        if _in_active_game() and config.is_configured():
+        reason = _active_game_reason()
+        configured = config.is_configured()
+        fired_full_cycle = False
+        if reason == "ok" and configured:
             chance = get_chance()
-            if random.randint(1, 100) <= chance:
+            roll = random.randint(1, 100)
+            if roll <= chance:
                 try:
                     _pick_and_fire()
-                except Exception:
-                    pass
+                    fired_full_cycle = True
+                except Exception as e:
+                    _log(f"_pick_and_fire raised: {type(e).__name__}: {e}")
+            else:
+                _log(f"Skipped this tick (rolled {roll} vs {chance}% chance).")
+                fired_full_cycle = True  # the dice are the source of truth -- full wait
+        else:
+            _log(f"Skipped tick: reason={reason}, configured={configured}. Will retry in 30s.")
 
-        # Sleep in small chunks; only count time when game is unpaused
+        # Pick the wait length: full interval after a real fire/roll, short retry
+        # after a game-state miss so a single paused moment doesn't burn 5 minutes.
         elapsed = 0
-        interval = get_interval_seconds()
-        while _running and elapsed < interval:
+        wait_target = get_interval_seconds() if fired_full_cycle else 30
+        while _running and elapsed < wait_target:
             time.sleep(5)
             if not _is_game_paused():
                 elapsed += 5
@@ -201,6 +245,17 @@ def restart():
     stop()
     time.sleep(0.1)
     start()
+
+
+def fire_now():
+    """Manually trigger the auto-event picker right now. Used by claude.fire_auto."""
+    _log("fire_now() called manually.")
+    try:
+        _pick_and_fire()
+        return True
+    except Exception as e:
+        _log(f"fire_now raised: {type(e).__name__}: {e}")
+        return False
 
 
 def status():

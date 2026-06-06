@@ -51,32 +51,52 @@ try:
     # Deferred in-game notification -- waits for the game client to be ready
     def _deferred_startup_notification():
         import time
-        for attempt in range(30):  # up to ~60 seconds
+        last_error = None
+        # Up to ~10 minutes -- the player may sit on the main menu before loading a save
+        for attempt in range(300):
             time.sleep(2)
             try:
-                import services
-                client = services.client_manager().get_first_client()
-                if client and client.active_sim:
-                    from . import notifications, config
-                    _log(f"Game client ready (attempt {attempt + 1}), showing startup notification.")
-                    if config.is_configured():
-                        body = (
-                            f"v{MOD_VERSION} ready!\n"
-                            f"Model: {config.get_default_model()}\n"
-                            f"Type 'claude.status' in the cheat console for all commands."
-                        )
-                        notifications.show(MOD_NAME, body)
-                    else:
-                        body = (
-                            f"v{MOD_VERSION} loaded but NOT configured.\n"
-                            f"Edit claude_config.cfg and add your API key,\n"
-                            f"then type 'claude.reload' in the cheat console."
-                        )
-                        notifications.show(MOD_NAME, body)
-                    return
+                # Re-import each iteration. On cold start the Sims 4 runtime can
+                # bind `services` to None until the world is loaded; once it's
+                # ready, the next import resolves to the real module.
+                import services as _services
+                if _services is None:
+                    continue
+                cm_fn = getattr(_services, "client_manager", None)
+                if cm_fn is None:
+                    continue
+                cm = cm_fn()
+                if cm is None:
+                    continue
+                client = cm.get_first_client()
+                if not client or not getattr(client, "active_sim", None):
+                    continue
+
+                from . import notifications, config
+                _log(f"Game client ready (attempt {attempt + 1}), showing startup notification.")
+                if config.is_configured():
+                    body = (
+                        f"v{MOD_VERSION} ready!\n"
+                        f"Model: {config.get_default_model()}\n"
+                        f"Type 'claude.status' in the cheat console for all commands."
+                    )
+                    notifications.show(MOD_NAME, body)
+                else:
+                    body = (
+                        f"v{MOD_VERSION} loaded but NOT configured.\n"
+                        f"Edit claude_config.cfg and add your API key,\n"
+                        f"then type 'claude.reload' in the cheat console."
+                    )
+                    notifications.show(MOD_NAME, body)
+                return
             except Exception as inner:
-                _log(f"Startup notification attempt {attempt + 1} failed: {type(inner).__name__}: {inner}")
-        _log("Startup notification gave up after 60 seconds -- no active sim found.")
+                # Log only when the error message changes -- avoids spamming the
+                # log with the same "not ready yet" line every 2 seconds.
+                err_sig = f"{type(inner).__name__}: {inner}"
+                if err_sig != last_error:
+                    _log(f"Startup notification waiting (attempt {attempt + 1}): {err_sig}")
+                    last_error = err_sig
+        _log("Startup notification gave up after 10 minutes -- no active sim found.")
 
     threading.Thread(
         target=_deferred_startup_notification,
