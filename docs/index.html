@@ -3,8 +3,45 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Claude AI for The Sims 4 — AI-powered phone calls, texts, and stories</title>
-  <meta name="description" content="A mod that brings Claude AI to The Sims 4. Random in-character phone calls, text conversations, story updates, random events, and storylines — all generated live based on your household.">
+  <title>Claude AI for The Sims 4 — AI mod for phone calls, texts, stories</title>
+  <meta name="description" content="A free script mod that brings Claude AI to The Sims 4. In-character phone calls, text conversations, story updates, random events, and 3-act storylines — generated live based on your household.">
+  <meta name="keywords" content="sims 4, sims 4 mod, ai mod, claude ai, anthropic, sims 4 ai, sims 4 phone mod, sims 4 dialogue mod, sims 4 storytelling, scriptmod">
+  <meta name="author" content="morganparadis">
+  <link rel="canonical" href="https://morganparadis.github.io/claude-for-sims-4/">
+
+  <!-- Open Graph (for Discord, Reddit, Facebook link previews) -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://morganparadis.github.io/claude-for-sims-4/">
+  <meta property="og:title" content="Claude AI for The Sims 4">
+  <meta property="og:description" content="A free script mod that brings Claude AI to The Sims 4 — in-character phone calls, texts, and stories generated live from your household.">
+  <meta property="og:image" content="https://morganparadis.github.io/claude-for-sims-4/img/friendexample.jpg">
+  <meta property="og:site_name" content="Claude AI for The Sims 4">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Claude AI for The Sims 4">
+  <meta name="twitter:description" content="A free script mod that brings Claude AI to The Sims 4 — in-character phone calls, texts, and stories generated live from your household.">
+  <meta name="twitter:image" content="https://morganparadis.github.io/claude-for-sims-4/img/friendexample.jpg">
+
+  <!-- Structured data: tells Google this is a downloadable mod -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Claude AI for The Sims 4",
+    "operatingSystem": "Windows, macOS",
+    "applicationCategory": "GameApplication",
+    "applicationSubCategory": "Game Mod",
+    "description": "A free script mod that brings Claude AI to The Sims 4 — generating in-character phone calls, text conversations, story updates, random events, and 3-act storylines live from your household data.",
+    "url": "https://morganparadis.github.io/claude-for-sims-4/",
+    "downloadUrl": "https://github.com/morganparadis/claude-for-sims-4",
+    "softwareVersion": "1.1.0",
+    "author": { "@type": "Person", "name": "morganparadis" },
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "license": "Open source"
+  }
+  </script>
+
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="apple-touch-icon" href="favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -307,23 +344,98 @@
   </ol>
 </section>
 
-<section class="cost container">
-  <h2>How much does it cost?</h2>
-  <p>
-    You pay Anthropic directly for the API calls — there's no subscription to me or anyone else.
-    Rough per-command estimates based on typical sim context size:
-  </p>
-  <table class="cost-table">
-    <thead>
-      <tr><th>What</th><th>Model</th><th>Per call</th></tr>
-    </thead>
-    <tbody>
-      <tr><td>Calls, texts, events, dialogue, goals</td><td>Haiku</td><td>~$0.005</td></tr>
-      <tr><td>Story, storyline, drama</td><td>Opus</td><td>~$0.05&ndash;0.15</td></tr>
-      <tr><td>Freeform chat</td><td>Opus</td><td>~$0.02&ndash;0.05</td></tr>
-    </tbody>
-  </table>
-  <p class="muted">A typical session of ~30 Haiku commands costs around $0.15. A heavier session with multiple Opus story/storyline generations usually lands between $0.50 and $1.50. You can set every command to use Haiku in the config to cut costs by roughly 20× if you don't need long-form narration.</p>
+<section class="faq container">
+  <h2>Common questions</h2>
+  <div class="faq-list">
+
+    <details class="faq-item">
+      <summary>Why use AI in The Sims 4?</summary>
+      <div class="faq-body">
+        <p>For storytelling. The base game's phone calls and texts are limited dropdown options — useful for gameplay, repetitive for narrative. This mod replaces them with text written specifically for your household by Claude, a large language model by Anthropic.</p>
+        <p>If you're a storytelling-focused player who's tired of the same scripted lines and wants your sims' relationships to feel alive, this is for you.</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Does this affect my saved game?</summary>
+      <div class="faq-body">
+        <p>No. The mod doesn't modify your saves, sims, or world. It only <em>reads</em> game data (who lives in the household, their traits, mood, and relationships) and shows generated text in notification popups and phone dialogs.</p>
+        <p>Generated content is saved separately in <code>ClaudeAI_Journal.json</code> inside your Mods folder, so the AI can reference past interactions across sessions. Uninstalling the mod removes everything cleanly — delete the <code>.ts4script</code>, config, and journal files.</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>What does Claude know about my sims?</summary>
+      <div class="faq-body">
+        <p>Just what's needed for the current command — names, ages, traits, mood, careers, aspirations, household members, and relationship history. Nothing personal about you, no real names beyond what your sims are named, no save file contents.</p>
+        <p>Per Anthropic's API terms, your prompts are not used to train models. The data goes from your computer directly to Anthropic's API and back — there's no middleman server.</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Is my Anthropic API key safe?</summary>
+      <div class="faq-body">
+        <p>Yes. The key lives only in <code>claude_config.cfg</code> on your computer. It's never uploaded anywhere except to make the API call to Anthropic. The mod doesn't have a server, doesn't phone home, and isn't open to anyone else.</p>
+        <p>That said, treat the key like a password — don't paste it in screenshots, Discord, or screen-shares. If you ever suspect it leaked, revoke it at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com/settings/keys</a> and make a new one.</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Can I disable specific features?</summary>
+      <div class="faq-body">
+        <p>Yes. Everything is opt-in. Auto-events (random calls/texts/stories while you play) can be toggled with <code>claude.auto_events off</code> in the cheat console. You can also edit <code>claude_config.cfg</code> to disable specific auto-event types, change interval/chance, or restrict which sims can call you.</p>
+        <p>If you don't run a command, nothing happens. The mod is dormant until you trigger it.</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Does it work on Mac?</summary>
+      <div class="faq-body">
+        <p>Yes — drop the <code>.ts4script</code> into <code>~/Documents/Electronic Arts/The Sims 4/Mods/</code> and it works identically to Windows. Same commands, same behavior.</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>How much does it cost?</summary>
+      <div class="faq-body">
+        <p>You pay Anthropic directly for what the mod actually uses — there's no subscription to me or anyone else. Per-command estimates based on typical sim context size:</p>
+        <table class="cost-table">
+          <thead>
+            <tr><th>What</th><th>Model</th><th>Per call</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Calls, texts, events, dialogue, goals</td><td>Haiku</td><td>~$0.005</td></tr>
+            <tr><td>Story, storyline, drama</td><td>Opus</td><td>~$0.05&ndash;0.15</td></tr>
+            <tr><td>Freeform chat</td><td>Opus</td><td>~$0.02&ndash;0.05</td></tr>
+          </tbody>
+        </table>
+        <p>A typical session of ~30 Haiku commands costs around $0.15. A heavier session with multiple Opus story/storyline generations usually lands between $0.50 and $1.50. Most casual players spend a few dollars a month at most.</p>
+        <p>You can set every command to use Haiku in the config to cut costs by roughly 20× if you don't need long-form narration.</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Does this slow down the game?</summary>
+      <div class="faq-body">
+        <p>No. All API calls happen on background threads, so the game keeps running while text is generated. You'll see a notification popup when the response arrives, usually within a few seconds.</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>What if I'm offline?</summary>
+      <div class="faq-body">
+        <p>The mod needs an internet connection to call Claude's API. If you're offline, commands silently fail without interrupting your game — no crashes, no popups. Your sims still play normally; you just won't get AI-generated content during offline sessions.</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Is this against the Sims 4 Terms of Service?</summary>
+      <div class="faq-body">
+        <p>No. The Sims 4 supports script mods officially through its Mods folder and Custom Content settings. This mod uses the documented script-mod system and doesn't modify any game files. EA's stance on script mods is that they're allowed; they just won't support issues that occur while mods are installed.</p>
+      </div>
+    </details>
+
+  </div>
 </section>
 
 <section class="changelog container">

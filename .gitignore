@@ -16,3 +16,6 @@ mc_*.txt
 analyze_pyc.py
 decompile_test.py
 *.txt
+
+# But the site needs robots.txt to be tracked
+!docs/robots.txt
