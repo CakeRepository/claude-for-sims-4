@@ -681,6 +681,39 @@ def _pick_random_relationship_sim(recipient=None):
     if recipient is not None:
         contacts = [c for c in contacts if _is_age_appropriate_contact(c, recipient)]
 
+    if not contacts and base_si:
+        # Fallback to any human NPC sim in the world
+        try:
+            import services
+            for si in services.sim_info_manager().values():
+                if si.sim_id == base_si.sim_id:
+                    continue
+                if base_si.household_id == si.household_id:
+                    continue
+                if not _is_human_sim(si):
+                    continue
+                if not allow_ghosts and _is_ghost(si):
+                    continue
+                if on_lot and si.sim_id in on_lot:
+                    continue
+
+                temp_contact = {
+                    "sim_info": si,
+                    "sim_id": si.sim_id,
+                    "name": f"{si.first_name} {si.last_name}".strip(),
+                    "status": "stranger",
+                    "friendship": 0,
+                    "romance": 0,
+                    "in_household": False,
+                }
+
+                if recipient is not None and not _is_age_appropriate_contact(temp_contact, recipient):
+                    continue
+
+                contacts.append(temp_contact)
+        except Exception:
+            pass
+
     if not contacts:
         return None
 

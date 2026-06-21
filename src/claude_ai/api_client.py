@@ -45,7 +45,22 @@ def _log_prompt(system, messages, model):
 
 
 def _extract_text(response_data):
-    # Try OpenAI / LM Studio format first if choices is present
+    # Try native LM Studio stateful chat format first (output blocks)
+    if "output" in response_data:
+        try:
+            output_list = response_data["output"]
+            if isinstance(output_list, list):
+                # Search for type: "message"
+                for block in output_list:
+                    if isinstance(block, dict) and block.get("type") == "message":
+                        return block.get("content", "")
+                # Fallback: if no type: "message", try the last block's content
+                if len(output_list) > 0 and isinstance(output_list[-1], dict):
+                    return output_list[-1].get("content", "")
+        except Exception:
+            pass
+
+    # Try OpenAI / LM Studio format if choices is present
     if "choices" in response_data:
         try:
             return response_data["choices"][0]["message"]["content"]
