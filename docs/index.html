@@ -408,7 +408,8 @@
     <details class="faq-item">
       <summary>How much does it cost?</summary>
       <div class="faq-body">
-        <p>You pay Anthropic directly for what the mod actually uses — there's no subscription to me or anyone else. Per-command estimates based on typical sim context size:</p>
+        <p>If you use Anthropic's cloud-based API, you pay them directly for what the mod actually uses (no subscriptions). However, you can also run the mod <strong>completely free</strong> by using a local model with LM Studio.</p>
+        <p>Anthropic cloud per-command estimates based on typical sim context size:</p>
         <table class="cost-table">
           <thead>
             <tr><th>What</th><th>Model</th><th>Per call</th></tr>
@@ -425,6 +426,25 @@
     </details>
 
     <details class="faq-item">
+      <summary>Can I run this mod locally and for free?</summary>
+      <div class="faq-body">
+        <p>Yes. If you don't want to use the cloud-based Anthropic API, you can run the mod completely free and offline by hosting a model locally using <strong>LM Studio</strong> (or other OpenAI-compatible backends like Ollama or vLLM).</p>
+        <p>To set it up:</p>
+        <ol>
+          <li>Download and launch <a href="https://lmstudio.ai" target="_blank" rel="noopener">LM Studio</a>.</li>
+          <li>Download and load a model of your choice (e.g., <code>google/gemma-4-e4b</code>).</li>
+          <li>Start the local server inside LM Studio.</li>
+          <li>Open <code>claude_config.cfg</code> in your Mods folder and set:
+            <pre><code>use_lmstudio = true
+lmstudio_api_url = http://localhost:1234/api/v1/chat</code></pre>
+          </li>
+          <li>Set <code>default_model</code> and <code>fast_model</code> in the config to match your local model identifier (e.g., <code>google/gemma-4-e4b</code>).</li>
+          <li>Save the file and run <code>claude.reload</code> in the game's cheat console.</li>
+        </ol>
+      </div>
+    </details>
+
+    <details class="faq-item">
       <summary>Does this slow down the game?</summary>
       <div class="faq-body">
         <p>No. All API calls happen on background threads, so the game keeps running while text is generated. You'll see a notification popup when the response arrives, usually within a few seconds.</p>
@@ -434,7 +454,8 @@
     <details class="faq-item">
       <summary>What if I'm offline?</summary>
       <div class="faq-body">
-        <p>The mod needs an internet connection to call Claude's API. If you're offline, commands silently fail without interrupting your game — no crashes, no popups. Your sims still play normally; you just won't get AI-generated content during offline sessions.</p>
+        <p>If you are using the cloud-based Anthropic API, you need an active internet connection. If you're offline, commands silently fail without interrupting your game.</p>
+        <p>However, if you are using <strong>LM Studio</strong> to run a local model, the mod communicates entirely on your machine (via localhost), so you can play and receive AI responses <strong>completely offline</strong>.</p>
       </div>
     </details>
 
