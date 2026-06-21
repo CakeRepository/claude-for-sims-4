@@ -137,8 +137,28 @@ claude.auto_events off
 | `auto_event_chance` | `40` | Percent chance each check fires |
 | `auto_event_types` | `event, goals, call, text` | Content types for auto-events |
 | `auto_event_weights` | *(blank)* | Weight per type (e.g. `call:40, text:30, event:20, goals:10`). Blank = equal. |
+| `use_lmstudio` | `false` | Set `true` to use a local LM Studio (or other OpenAI-compatible) endpoint instead of Anthropic's API. No API key is required. |
+| `lmstudio_api_url` | `http://localhost:1234/v1/chat/completions` | The local API endpoint URL for LM Studio. |
 
 After editing the config, type `claude.reload` in-game to apply changes without restarting.
+
+---
+
+## Running with Local LLM (LM Studio)
+
+You can run this mod completely free of charge by hosting a model locally using LM Studio (or another OpenAI-compatible server like Ollama or vLLM).
+
+### Setup Instructions
+1. Open **LM Studio** and download a model of your choice (e.g., Llama 3, Mistral, or Phi-3).
+2. Start the **Local Server** inside LM Studio (defaulting to port `1234`).
+3. Open `claude_config.cfg` in your Mods folder.
+4. Set:
+   ```ini
+   use_lmstudio = true
+   lmstudio_api_url = http://localhost:1234/v1/chat/completions
+   ```
+5. *(Optional)* Set `default_model` and `fast_model` in the configuration to match the model identifier you loaded, or leave them as-is (LM Studio typically routes queries to whichever model is currently active/loaded).
+6. Save the config file and run `claude.reload` in the game's cheat console.
 
 ---
 

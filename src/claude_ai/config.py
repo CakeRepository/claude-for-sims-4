@@ -17,15 +17,14 @@ _SETTINGS_FILENAME = "ClaudeAI_Settings.json"
 
 def _find_config_file():
     """Search for config file in the Mods folder and relative to this script."""
-    # Primary: check the known Mods folder location directly
+    # Primary: check the known Mods folder location directly (case-insensitive checks)
     # (walking up from __file__ doesn't work inside a .ts4script zip)
-    mods_folder = os.path.join(
-        os.path.expanduser("~"), "Documents",
-        "Electronic Arts", "The Sims 4", "Mods",
-    )
-    mods_path = os.path.join(mods_folder, _CONFIG_FILENAME)
-    if os.path.isfile(mods_path):
-        return os.path.abspath(mods_path)
+    docs = os.path.join(os.path.expanduser("~"), "Documents")
+    for folder_name in ("mods", "Mods"):
+        mods_folder = os.path.join(docs, "Electronic Arts", "The Sims 4", folder_name)
+        mods_path = os.path.join(mods_folder, _CONFIG_FILENAME)
+        if os.path.isfile(mods_path):
+            return os.path.abspath(mods_path)
 
     # Fallback: walk up from script location (works during development)
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -114,8 +113,22 @@ def get_language():
     return get_config().get("claude_ai", "language", fallback="English")
 
 
+def get_use_lmstudio():
+    try:
+        return get_config().getboolean("claude_ai", "use_lmstudio", fallback=False)
+    except ValueError:
+        return False
+
+
+def get_lmstudio_api_url():
+    return get_config().get("claude_ai", "lmstudio_api_url", fallback="http://localhost:1234/v1/chat/completions")
+
+
 def is_configured():
+    if get_use_lmstudio():
+        return True
     key = get_api_key()
     return bool(key and key != "YOUR_API_KEY_HERE")
+
 
 

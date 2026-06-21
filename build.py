@@ -27,7 +27,9 @@ def find_mods_folder():
     """Attempt to locate the Sims 4 Mods folder on this machine."""
     docs = os.path.expanduser("~/Documents")
     candidates = [
+        os.path.join(docs, "Electronic Arts", "The Sims 4", "mods"),
         os.path.join(docs, "Electronic Arts", "The Sims 4", "Mods"),
+        os.path.expanduser("~/Documents/Electronic Arts/The Sims 4/mods"),
         os.path.expanduser("~/Documents/Electronic Arts/The Sims 4/Mods"),
     ]
     for path in candidates:

@@ -45,6 +45,13 @@ def _log_prompt(system, messages, model):
 
 
 def _extract_text(response_data):
+    # Try OpenAI / LM Studio format first if choices is present
+    if "choices" in response_data:
+        try:
+            return response_data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError):
+            pass
+    # Fallback to Anthropic format
     try:
         return response_data["content"][0]["text"]
     except (KeyError, IndexError, TypeError):
@@ -53,7 +60,7 @@ def _extract_text(response_data):
 
 def call_claude_async(messages, system=None, use_fast_model=False, callback=None):
     """
-    Make an async call to the Claude API on a background thread.
+    Make an async call to the Claude API (or LM Studio) on a background thread.
 
     Args:
         messages: list of {"role": "user"|"assistant", "content": str}
@@ -72,14 +79,50 @@ def call_claude_async(messages, system=None, use_fast_model=False, callback=None
 
         model = config.get_fast_model() if use_fast_model else config.get_default_model()
         max_tokens = config.get_max_tokens()
+        use_lmstudio = config.get_use_lmstudio()
+        lmstudio_url = config.get_lmstudio_api_url() if use_lmstudio else ""
 
-        body = {
-            "model": model,
-            "max_tokens": max_tokens,
-            "messages": messages,
-        }
-        if system:
-            body["system"] = system
+        if use_lmstudio and "/api/v1/chat" in lmstudio_url:
+            # Native stateful LM Studio formatting
+            input_parts = []
+            for msg in messages:
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                if role == "user":
+                    input_parts.append(f"User: {content}")
+                else:
+                    input_parts.append(f"Assistant: {content}")
+
+            if len(messages) == 1 and messages[0].get("role") == "user":
+                input_str = messages[0].get("content", "")
+            else:
+                input_str = "\n".join(input_parts)
+
+            body = {
+                "model": model,
+                "system_prompt": system or "",
+                "input": input_str
+            }
+        elif use_lmstudio:
+            # OpenAI compatible formatting
+            openai_messages = []
+            if system:
+                openai_messages.append({"role": "system", "content": system})
+            openai_messages.extend(messages)
+            body = {
+                "model": model,
+                "max_tokens": max_tokens,
+                "messages": openai_messages,
+            }
+        else:
+            # Anthropic formatting
+            body = {
+                "model": model,
+                "max_tokens": max_tokens,
+                "messages": messages,
+            }
+            if system:
+                body["system"] = system
 
         # Log the prompt so we can debug what Claude actually saw
         _log_prompt(system, messages, model)
@@ -96,15 +139,29 @@ def call_claude_async(messages, system=None, use_fast_model=False, callback=None
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 startupinfo.wShowWindow = 0
 
-            result = subprocess.run(
-                [
+            if use_lmstudio:
+                url = lmstudio_url
+                curl_cmd = [
+                    "curl", "-s",
+                    "-X", "POST",
+                    "-H", "Content-Type: application/json",
+                ]
+                if api_key and api_key != "YOUR_API_KEY_HERE":
+                    curl_cmd.extend(["-H", f"Authorization: Bearer {api_key}"])
+            else:
+                url = _API_URL
+                curl_cmd = [
                     "curl", "-s",
                     "-X", "POST",
                     "-H", "Content-Type: application/json",
                     "-H", "x-api-key: " + api_key,
                     "-H", "anthropic-version: " + _API_VERSION,
+                ]
+
+            result = subprocess.run(
+                curl_cmd + [
                     "-d", body_json,
-                    _API_URL,
+                    url,
                 ],
                 capture_output=True,
                 text=True,
