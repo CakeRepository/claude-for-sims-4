@@ -588,6 +588,21 @@ section > p { max-width: 780px; margin-left: auto; margin-right: auto; }
   display: block;
 }
 
+.bitcoin-address {
+  display: inline-block;
+  margin-top: 0.85rem;
+  padding: 8px 14px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font-size: 0.85rem;
+  color: var(--ink);
+  word-break: break-all;
+  max-width: 100%;
+  user-select: all;
+  cursor: text;
+}
+
 /* -------- Footer -------- */
 
 .site-footer {
