@@ -7,6 +7,7 @@ import datetime
 import json
 import os
 import subprocess
+import sys
 import threading
 
 from . import config
@@ -86,10 +87,14 @@ def call_claude_async(messages, system=None, use_fast_model=False, callback=None
         body_json = json.dumps(body)
 
         try:
-            # Hide the terminal window on Windows
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = 0
+            # Hide the terminal window on Windows. On Mac/Linux this attribute
+            # doesn't exist on subprocess, so we pass None and rely on the
+            # default behavior (subprocess on macOS doesn't pop a window anyway).
+            startupinfo = None
+            if sys.platform == "win32":
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = 0
 
             result = subprocess.run(
                 [
