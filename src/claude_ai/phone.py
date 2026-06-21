@@ -415,16 +415,30 @@ Just the messages, nothing else."""
 _PHONE_ELIGIBLE_AGES = ("TEEN", "YOUNGADULT", "YOUNG_ADULT", "ADULT", "ELDER")
 
 
+# Non-human species names to reject. We check by suffix so this works with
+# enum representations like SpeciesType.LARGE_DOG, Species.LARGE_DOG, etc.
+_NON_HUMAN_SPECIES_SUFFIXES = (
+    "LARGE_DOG", "SMALL_DOG", "DOG", "CAT", "HORSE", "FOX",
+)
+
+
 def _is_human_sim(sim_info):
-    """Return True if this is a human sim (not a dog, cat, horse, fox, etc).
-    Sims 4 returns SpeciesType.HUMAN for humans, LARGE_DOG/SMALL_DOG/CAT/HORSE/FOX for pets.
-    If the species attribute is missing (very old saves), assume human."""
+    """Return True if this is a human sim (not a dog, cat, horse, fox).
+    Sims 4 species enum repr varies across versions (SpeciesType.HUMAN vs
+    Species.HUMAN vs SpeciesExtended.HUMAN), so we check by SUFFIX instead
+    of an exact match. We blocklist known pet suffixes rather than
+    allowlisting HUMAN, so anything unrecognized defaults to allowed
+    (safer for old saves and edge cases)."""
     try:
         species = getattr(sim_info, "species", None)
         if species is None:
             return True
-        species_str = str(species).replace("SpeciesType.", "").upper().replace(" ", "")
-        return species_str == "HUMAN"
+        species_str = str(species).upper().replace(" ", "")
+        # If we recognize this as a non-human species, reject.
+        for suffix in _NON_HUMAN_SPECIES_SUFFIXES:
+            if species_str.endswith(suffix):
+                return False
+        return True
     except Exception:
         return True
 
@@ -440,6 +454,33 @@ def _is_phone_eligible(sim_info):
         return False
 
 
+def _log_household_inspection():
+    """Dump the active household's sims with age/species so we can diagnose
+    why no eligible recipients were found. Called only when the picker fails."""
+    try:
+        import os, datetime, services
+        path = os.path.join(os.path.expanduser("~"), "Documents", "ClaudeAI_Log.txt")
+        ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        hh = services.active_household()
+        with open(path, "a", encoding="utf-8") as f:
+            if not hh:
+                f.write(f"[{ts}] [phone] _pick_recipient_sim: no active household.\n")
+                return
+            sims = list(hh.sim_info_gen())
+            f.write(f"[{ts}] [phone] _pick_recipient_sim: scanned household with {len(sims)} sims:\n")
+            for si in sims:
+                try:
+                    name = f"{si.first_name} {si.last_name}".strip()
+                    age_repr = repr(getattr(si, "age", None))
+                    species_repr = repr(getattr(si, "species", None))
+                    eligible = _is_phone_eligible(si)
+                    f.write(f"[{ts}] [phone]   - {name}: age={age_repr}, species={species_repr}, eligible={eligible}\n")
+                except Exception as inner:
+                    f.write(f"[{ts}] [phone]   - <error reading sim>: {type(inner).__name__}: {inner}\n")
+    except Exception:
+        pass
+
+
 def _pick_recipient_sim():
     """
     Pick a random teen+ household member to receive an incoming call/text.
@@ -453,12 +494,14 @@ def _pick_recipient_sim():
             main = sim_context.get_main_sim_info()
             if main and _is_phone_eligible(main):
                 return main
+            _log_household_inspection()
             return None
         eligible = []
         for si in hh.sim_info_gen():
             if _is_phone_eligible(si):
                 eligible.append(si)
         if not eligible:
+            _log_household_inspection()
             return None
         return _random.choice(eligible)
     except Exception:
