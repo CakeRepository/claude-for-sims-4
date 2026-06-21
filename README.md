@@ -144,17 +144,17 @@ After editing the config, type `claude.reload` in-game to apply changes without 
 
 ## API Cost
 
-Everything is very cheap. Rough estimates per command:
+You pay Anthropic per-token for what the mod actually uses. Rough estimates per command, assuming typical sim context size:
 
 | Type | Model | Estimated cost |
 |---|---|---|
-| Dialogue, events, goals, calls, texts | Haiku | ~$0.001 |
-| Story, storyline, drama | Opus | ~$0.01-0.02 |
-| Chat | Opus | ~$0.005-0.01 |
+| Dialogue, events, goals, calls, texts | Haiku | ~$0.005 |
+| Story, storyline, drama | Opus | ~$0.05–0.15 |
+| Chat | Opus | ~$0.02–0.05 |
 
-A heavy play session with 30+ commands + auto-events would cost around $0.20-0.50.
+A typical session with ~30 Haiku commands is about **$0.15**. A heavy session that also includes several Opus story/storyline commands typically lands **between $0.50 and $1.50**.
 
-**To reduce cost further**, set `default_model = claude-haiku-4-5` in the config. The quality drops a bit for long-form stories but is still good for events and dialogue.
+**To minimize cost**, set `default_model = claude-haiku-4-5` in the config so every command uses Haiku. The quality drops a bit for long-form stories but stays good for events, dialogue, and short narratives — and your bill drops by roughly 20×.
 
 ---
 

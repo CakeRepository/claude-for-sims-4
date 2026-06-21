@@ -17,6 +17,15 @@
 <header class="hero">
   <div class="container hero-inner">
     <div class="plumbob" aria-hidden="true">
+      <span class="sparkle s1"></span>
+      <span class="sparkle s2"></span>
+      <span class="sparkle s3"></span>
+      <span class="sparkle s4"></span>
+      <span class="sparkle s5"></span>
+      <span class="sparkle s6"></span>
+      <span class="sparkle s7"></span>
+      <span class="sparkle s8"></span>
+      <span class="sparkle s9"></span>
       <svg viewBox="0 0 60 80" width="64" height="84">
         <defs>
           <linearGradient id="plumbobGrad" x1="0" y1="0" x2="0" y2="1">
@@ -33,7 +42,13 @@
         <polygon points="30,10 50,40 30,52 10,40" fill="url(#plumbobShine)"/>
       </svg>
     </div>
-    <h1>Claude AI for The Sims 4</h1>
+    <h1><span class="brand-claude">
+      <span class="text-sparkle ts1"></span>
+      <span class="text-sparkle ts2"></span>
+      <span class="text-sparkle ts3"></span>
+      <span class="text-sparkle ts4"></span>
+      <span class="text-sparkle ts5"></span>
+      <span class="text-sparkle ts6"></span>Claude AI</span> for The Sims 4</h1>
     <p class="tagline">Phone calls, texts, stories, and drama — generated live for your Sims by Claude AI.</p>
     <div class="cta-row">
       <a class="btn btn-primary" href="https://github.com/morganparadis/claude-for-sims-4">Get it on GitHub</a>
@@ -42,7 +57,6 @@
     <div class="badges">
       <span class="badge">Free &amp; open source</span>
       <span class="badge">Bring your own API key</span>
-      <span class="badge">Windows 10+</span>
     </div>
   </div>
 </header>
@@ -218,7 +232,7 @@
       <div class="step-num">2</div>
       <div class="step-body">
         <h3>Get your Claude API key</h3>
-        <p>The mod uses Claude (made by Anthropic) to write the dialogue and stories. You need your own API key — it's free to sign up, and you only pay for what you use. <strong>A whole evening of play is usually 25&ndash;50 cents.</strong></p>
+        <p>The mod uses Claude (made by Anthropic) to write the dialogue and stories. You need your own API key — it's free to sign up, and you only pay for what you use. <strong>A typical session runs about 25 cents to a dollar</strong>, depending on how often you generate long stories.</p>
 
         <div class="callout">
           <h4>Step-by-step: getting your API key</h4>
@@ -230,7 +244,7 @@
               <strong>Verify your email and phone number</strong> if Anthropic asks. This is a one-time anti-spam check.
             </li>
             <li>
-              <strong>Add a credit card and buy a little credit.</strong> Anthropic needs a card on file before they'll let you use the API. Go to <em>Settings &rarr; Billing</em> and add <strong>$5</strong> (the minimum). That's enough for thousands of in-game calls and texts — most players never come close to using it up in a month.
+              <strong>Add a credit card and buy a little credit.</strong> Anthropic needs a card on file before they'll let you use the API. Go to <em>Settings &rarr; Billing</em> and add <strong>$5</strong> (the minimum). That's roughly 1,000 in-game calls and texts at the typical cost &mdash; usually a few weeks of casual play.
             </li>
             <li>
               <strong>Create the key.</strong> In the left sidebar click <em>API Keys</em> (or go to <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com/settings/keys</a>), then click the <em>Create Key</em> button.
@@ -269,7 +283,7 @@
       <div class="step-num">4</div>
       <div class="step-body">
         <h3>Paste your API key into the config</h3>
-        <p>Open <code>claude_config.cfg</code> with any text editor (Notepad, VS Code, TextEdit on Mac). Find this line near the top:</p>
+        <p>Open <code>claude_config.cfg</code> with any plain text editor (TextEdit, Notepad, VS Code &mdash; anything that saves plain text). Find this line near the top:</p>
         <pre><code>api_key = YOUR_API_KEY_HERE</code></pre>
         <p>Replace <code>YOUR_API_KEY_HERE</code> with the key you copied. It should look like:</p>
         <pre><code>api_key = sk-ant-api03-Xy7…(your full key)…</code></pre>
@@ -297,19 +311,19 @@
   <h2>How much does it cost?</h2>
   <p>
     You pay Anthropic directly for the API calls — there's no subscription to me or anyone else.
-    Rough estimates per command:
+    Rough per-command estimates based on typical sim context size:
   </p>
   <table class="cost-table">
     <thead>
       <tr><th>What</th><th>Model</th><th>Per call</th></tr>
     </thead>
     <tbody>
-      <tr><td>Calls, texts, events, dialogue, goals</td><td>Haiku</td><td>~$0.001</td></tr>
-      <tr><td>Story, storyline, drama</td><td>Opus</td><td>~$0.01&ndash;0.02</td></tr>
-      <tr><td>Freeform chat</td><td>Opus</td><td>~$0.005&ndash;0.01</td></tr>
+      <tr><td>Calls, texts, events, dialogue, goals</td><td>Haiku</td><td>~$0.005</td></tr>
+      <tr><td>Story, storyline, drama</td><td>Opus</td><td>~$0.05&ndash;0.15</td></tr>
+      <tr><td>Freeform chat</td><td>Opus</td><td>~$0.02&ndash;0.05</td></tr>
     </tbody>
   </table>
-  <p class="muted">A long session with 30+ commands plus auto-events usually lands between $0.20 and $0.50.</p>
+  <p class="muted">A typical session of ~30 Haiku commands costs around $0.15. A heavier session with multiple Opus story/storyline generations usually lands between $0.50 and $1.50. You can set every command to use Haiku in the config to cut costs by roughly 20× if you don't need long-form narration.</p>
 </section>
 
 <section class="support container">
