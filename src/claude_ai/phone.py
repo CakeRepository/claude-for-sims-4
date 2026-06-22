@@ -221,7 +221,12 @@ Format your response as:
 <line 2>
 <line 3, optional>
 
-Just the spoken lines, nothing else."""
+Just the spoken lines, then ONE final line:
+MOOD: <emotion>
+
+Pick one emotion that captures how the player's sim would feel after this \
+call: happy, sad, angry, confident, flirty, playful, energized, focused, \
+inspired, embarrassed, tense, uncomfortable, bored, dazed."""
 
 _TEXT_SYSTEM = """You write text messages from a Sim in The Sims 4 to the player's sim. \
 Stay in character as the sender. Write in {language}.
@@ -352,7 +357,12 @@ Format your response as:
 <message 1 text>
 <message 2 text, optional, on its own line>
 
-Just the messages, nothing else."""
+Just the messages, then ONE final line:
+MOOD: <emotion>
+
+Pick one emotion that captures how the player's sim would feel after \
+reading this: happy, sad, angry, confident, flirty, playful, energized, \
+focused, inspired, embarrassed, tense, uncomfortable, bored, dazed."""
 
 _REPLY_SYSTEM = """You write a Sim's reply to a text from the player's sim in The Sims 4. \
 Stay in character as {other_name} replying to {main_name}. Write in {language}.
@@ -407,13 +417,62 @@ Format your response as:
 <message 1 text>
 <message 2 text, optional>
 
-Just the messages, nothing else."""
+Just the messages, then ONE final line:
+MOOD: <emotion>
+
+Pick one emotion that captures how the player's sim would feel after \
+reading this: happy, sad, angry, confident, flirty, playful, energized, \
+focused, inspired, embarrassed, tense, uncomfortable, bored, dazed."""
 
 
 
 
 # Ages eligible to receive phone calls and texts (teen and above)
 _PHONE_ELIGIBLE_AGES = ("TEEN", "YOUNGADULT", "YOUNG_ADULT", "ADULT", "ELDER")
+
+# Moods strong enough that applying a moodlet from a *reply* (not just
+# an unsolicited incoming) still feels earned. Unsolicited incoming
+# calls/texts apply moodlets for any mood that has a buff available.
+_CHARGED_MOODS = frozenset({"sad", "angry", "flirty", "embarrassed",
+                            "tense", "uncomfortable", "dazed"})
+
+
+def _refresh_milestones_for(contact, recipient_sim):
+    """Run a targeted milestone scan on just the two sims about to appear
+    in the prompt -- catches in-game events (job quit, divorce, etc.) that
+    happened since the last full scan."""
+    try:
+        from . import milestones as _milestones
+        sims = []
+        ci = contact.get("sim_info") if isinstance(contact, dict) else None
+        if ci is not None:
+            sims.append(ci)
+        if recipient_sim is not None:
+            sims.append(recipient_sim)
+        if sims:
+            _milestones.scan_sims(sims)
+    except Exception:
+        pass
+
+
+def _apply_mood_from_text(text, recipient=None, is_incoming=False):
+    """Extract the MOOD: tag, apply the matching moodlet to the recipient,
+    and return the cleaned text. Rules:
+      - is_incoming=True (unsolicited auto-fired call/text): apply any mood
+      - is_incoming=False (reply / contact response to player-initiated):
+        only apply if the mood is in _CHARGED_MOODS, so we don't slap a
+        Feeling Happy moodlet on the player for every benign reply.
+    """
+    clean_text, mood = moodlets.extract_mood_tag(text)
+    if mood and recipient is not None:
+        try:
+            should_apply = is_incoming or mood in _CHARGED_MOODS
+            if should_apply:
+                moodlets.apply_mood(recipient, mood, reason="from incoming text/call" if is_incoming else "from reply")
+        except Exception:
+            pass
+    return clean_text
+
 
 # Personality traits that slow down or speed up text replies. Used by
 # _calculate_reply_delay to make texting feel realistic for each sim.
@@ -1821,6 +1880,8 @@ def generate_call(callback=None, output=None):
 
     recipient_name = recipient.first_name
 
+    _refresh_milestones_for(contact, recipient)
+
     language = config.get_language()
     system = _CALL_SYSTEM.format(language=language)
     rel_desc = _describe_relationship(contact, recipient=recipient)
@@ -1849,7 +1910,7 @@ use a generic reference like 'a coworker', 'my neighbor', 'this friend of mine' 
     def _on_result(text, error):
         title = f"Call from {contact['name']}"
         if text:
-            text = moodlets.clean_response(text)
+            text = _apply_mood_from_text(text, recipient=recipient, is_incoming=True)
             _start_conversation(contact, text, recipient_sim=recipient)
             journal.add_entry("call", f"Call from {contact['name']} (to {recipient_name}):\n{text}", sim_name=contact["name"], recipient_name=recipient_name)
             caller_si = contact.get("sim_info")
@@ -1893,6 +1954,8 @@ def generate_text(callback=None, output=None):
 
     recipient_name = recipient.first_name
 
+    _refresh_milestones_for(contact, recipient)
+
     language = config.get_language()
     system = _TEXT_SYSTEM.format(language=language)
     rel_desc = _describe_relationship(contact, recipient=recipient)
@@ -1921,7 +1984,7 @@ use a generic reference like 'a coworker', 'my neighbor', 'this friend of mine' 
     def _on_result(text, error):
         title = f"Text from {contact['name']}"
         if text:
-            text = moodlets.clean_response(text)
+            text = _apply_mood_from_text(text, recipient=recipient, is_incoming=True)
             _start_conversation(contact, text, recipient_sim=recipient)
             journal.add_entry("text", f"Text from {contact['name']} (to {recipient_name}):\n{text}", sim_name=contact["name"], recipient_name=recipient_name)
             sender_si = contact.get("sim_info")
@@ -1972,6 +2035,8 @@ def generate_reply(player_message, callback=None, output=None):
         main_name = main_si.first_name if main_si else "your Sim"
     other_name = contact["name"]
 
+    _refresh_milestones_for(contact, recipient)
+
     language = config.get_language()
     system = _REPLY_SYSTEM.format(
         language=language,
@@ -2010,7 +2075,7 @@ def generate_reply(player_message, callback=None, output=None):
                 callback(text, error)
             return
 
-        text_clean = moodlets.clean_response(text)
+        text_clean = _apply_mood_from_text(text, recipient=recipient, is_incoming=False)
         delay = _calculate_reply_delay(contact)
 
         def _show_reply():
@@ -2060,6 +2125,8 @@ def send_text(contact, player_message, callback=None, output=None):
     rid = main_si.sim_id if (main_si and getattr(main_si, "sim_id", None)) else 0
     _conversations[rid]["history"] = [{"role": "you", "text": player_message}]
 
+    _refresh_milestones_for(contact, main_si)
+
     language = config.get_language()
     system = _REPLY_SYSTEM.format(
         language=language,
@@ -2095,7 +2162,7 @@ def send_text(contact, player_message, callback=None, output=None):
                 callback(text, error)
             return
 
-        text_clean = moodlets.clean_response(text)
+        text_clean = _apply_mood_from_text(text, recipient=main_si, is_incoming=False)
         delay = _calculate_reply_delay(contact)
 
         def _show_reply():
@@ -2145,6 +2212,8 @@ def send_call(contact, player_topic, callback=None, output=None):
     rid = main_si.sim_id if (main_si and getattr(main_si, "sim_id", None)) else 0
     _conversations[rid]["history"] = [{"role": "you", "text": player_topic}]
 
+    _refresh_milestones_for(contact, main_si)
+
     language = config.get_language()
     system = _CALL_SYSTEM.format(language=language)
     rel_desc = _describe_relationship(contact)
@@ -2166,7 +2235,7 @@ def send_call(contact, player_topic, callback=None, output=None):
 
     def _on_send_call_result(text, error):
         if text:
-            text = moodlets.clean_response(text)
+            text = _apply_mood_from_text(text, recipient=main_si, is_incoming=False)
             if rid in _conversations:
                 _conversations[rid]["history"].append({"role": "them", "text": text})
             journal.add_entry(

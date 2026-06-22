@@ -130,6 +130,46 @@ try:
             output("[Claude AI] fire_now() raised an exception -- see log.")
 
     # -------------------------------------------------------------------------
+    # Moodlet investigation (debug)
+    # -------------------------------------------------------------------------
+
+    @sims4.commands.Command("claude.dumpbuffs", command_type=sims4.commands.CommandType.Live)
+    def cmd_dump_buffs(keyword: str = None, _connection=None):
+        """List every loaded buff class whose name contains <keyword> --
+        writes results to Documents/ClaudeAI_BuffList.txt for investigation."""
+        from . import moodlets
+        output = sims4.commands.CheatOutput(_connection)
+        if not keyword:
+            output("[Claude AI] Usage: claude.dumpbuffs <keyword>")
+            output("[Claude AI] e.g. claude.dumpbuffs cheerful")
+            output("[Claude AI] e.g. claude.dumpbuffs feeling")
+            return
+        count = moodlets.dump_buffs_matching(keyword)
+        output(f"[Claude AI] Found {count} buff(s) matching '{keyword}'. See Documents/ClaudeAI_BuffList.txt")
+
+    @sims4.commands.Command("claude.testmoodlet", command_type=sims4.commands.CommandType.Live)
+    def cmd_test_moodlet(mood: str = None, _connection=None):
+        """Try to apply a generic moodlet to the active sim for testing.
+        Logs the outcome and reports success/failure in the console."""
+        from . import moodlets
+        output = sims4.commands.CheatOutput(_connection)
+        if not mood:
+            output("[Claude AI] Usage: claude.testmoodlet <emotion>")
+            output("[Claude AI] Supported: happy, sad, angry, confident, playful, flirty")
+            return
+        active = sim_context.get_active_sim()
+        sim_info = active.sim_info if active else None
+        if not sim_info:
+            output("[Claude AI] No active sim -- enter live mode in a household first.")
+            return
+        ok = moodlets.apply_mood(sim_info, mood, reason="manual test via claude.testmoodlet")
+        if ok:
+            output(f"[Claude AI] Applied a '{mood}' moodlet to {sim_info.first_name}. Check their moodlet panel.")
+        else:
+            output(f"[Claude AI] Could not apply '{mood}' -- see ClaudeAI_Log.txt.")
+            output(f"[Claude AI] Try: claude.dumpbuffs {mood}  -- then claude.dumpbuffs feeling")
+
+    # -------------------------------------------------------------------------
     # Dialogue
     # -------------------------------------------------------------------------
 

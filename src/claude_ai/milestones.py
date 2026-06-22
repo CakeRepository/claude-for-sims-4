@@ -397,6 +397,51 @@ def start_background_scan():
     threading.Thread(target=scan_and_record, daemon=True, name="ClaudeAI-Milestones").start()
 
 
+def scan_sims(sim_infos):
+    """Targeted scan of a small set of specific sims. Called right before
+    building a phone prompt so any in-game event (job quit, divorce, etc.)
+    that happened since the last full scan still surfaces. Fast: only
+    touches the sims passed in, not the whole relationship network."""
+    if not sim_infos:
+        return
+    try:
+        import services
+        hh = services.active_household()
+        active_hh_id = _safe(hh, "id", None) if hh else None
+
+        snapshots = _load_snapshots()
+        milestones = _load_milestones()
+        now_iso = datetime.datetime.now().isoformat()
+
+        new_count = 0
+        for sim_info in sim_infos:
+            if sim_info is None:
+                continue
+            sid = _safe(sim_info, "sim_id", None)
+            if sid is None:
+                continue
+            sid_key = str(sid)
+            curr = _capture(sim_info, active_hh_id)
+            if not curr:
+                continue
+            prev = snapshots.get(sid_key)
+            events = _diff(prev, curr, curr.get("name") or "Someone")
+            for ev in events:
+                ev["timestamp"] = now_iso
+                ev["sim_id"] = sid_key
+                ev["sim_name"] = curr.get("name")
+                milestones.append(ev)
+                new_count += 1
+            snapshots[sid_key] = curr
+
+        _save_snapshots(snapshots)
+        if new_count > 0:
+            _save_milestones(milestones)
+            _log(f"Targeted scan: {new_count} new milestone(s) across {len(sim_infos)} sim(s).")
+    except Exception as e:
+        _log(f"scan_sims raised: {type(e).__name__}: {e}")
+
+
 # ---------------------------------------------------------------------------
 # Prompt formatting
 # ---------------------------------------------------------------------------
