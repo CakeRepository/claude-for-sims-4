@@ -221,12 +221,17 @@ Format your response as:
 <line 2>
 <line 3, optional>
 
-Just the spoken lines, then ONE final line:
+Just the spoken lines, then OPTIONALLY one final line:
 MOOD: <emotion>
 
-Pick one emotion that captures how the player's sim would feel after this \
-call: happy, sad, angry, confident, flirty, playful, energized, focused, \
-inspired, embarrassed, tense, uncomfortable, bored, dazed."""
+ONLY include the MOOD line if this call would *genuinely* change how \
+the recipient feels — big news, an argument, a confession, a flirty \
+escalation, a death in the family, etc. SKIP the MOOD line for routine \
+check-ins, mundane updates, gossip, casual catching-up, or small talk. \
+Most calls should NOT emit a MOOD line. \
+If you do include it, pick from: happy, sad, angry, confident, flirty, \
+playful, energized, focused, inspired, embarrassed, tense, uncomfortable, \
+bored, dazed."""
 
 _TEXT_SYSTEM = """You write text messages from a Sim in The Sims 4 to the player's sim. \
 Stay in character as the sender. Write in {language}.
@@ -357,12 +362,17 @@ Format your response as:
 <message 1 text>
 <message 2 text, optional, on its own line>
 
-Just the messages, then ONE final line:
+Just the messages, then OPTIONALLY one final line:
 MOOD: <emotion>
 
-Pick one emotion that captures how the player's sim would feel after \
-reading this: happy, sad, angry, confident, flirty, playful, energized, \
-focused, inspired, embarrassed, tense, uncomfortable, bored, dazed."""
+ONLY include the MOOD line if this text would *genuinely* change how \
+the recipient feels — big news, an argument, a confession, a flirty \
+escalation, etc. SKIP the MOOD line for routine check-ins, mundane \
+updates, gossip, casual catching-up, or small talk. Most texts should \
+NOT emit a MOOD line. \
+If you do include it, pick from: happy, sad, angry, confident, flirty, \
+playful, energized, focused, inspired, embarrassed, tense, uncomfortable, \
+bored, dazed."""
 
 _REPLY_SYSTEM = """You write a Sim's reply to a text from the player's sim in The Sims 4. \
 Stay in character as {other_name} replying to {main_name}. Write in {language}.
@@ -417,12 +427,17 @@ Format your response as:
 <message 1 text>
 <message 2 text, optional>
 
-Just the messages, then ONE final line:
+Just the messages, then OPTIONALLY one final line:
 MOOD: <emotion>
 
-Pick one emotion that captures how the player's sim would feel after \
-reading this: happy, sad, angry, confident, flirty, playful, energized, \
-focused, inspired, embarrassed, tense, uncomfortable, bored, dazed."""
+ONLY include the MOOD line if this text would *genuinely* change how \
+the recipient feels — big news, an argument, a confession, a flirty \
+escalation, etc. SKIP the MOOD line for routine check-ins, mundane \
+updates, gossip, casual catching-up, or small talk. Most texts should \
+NOT emit a MOOD line. \
+If you do include it, pick from: happy, sad, angry, confident, flirty, \
+playful, energized, focused, inspired, embarrassed, tense, uncomfortable, \
+bored, dazed."""
 
 
 
@@ -435,6 +450,34 @@ _PHONE_ELIGIBLE_AGES = ("TEEN", "YOUNGADULT", "YOUNG_ADULT", "ADULT", "ELDER")
 # calls/texts apply moodlets for any mood that has a buff available.
 _CHARGED_MOODS = frozenset({"sad", "angry", "flirty", "embarrassed",
                             "tense", "uncomfortable", "dazed"})
+
+# Cooldown safety net: don't apply more than one moodlet per sim within
+# this window of real-world seconds, even if the LLM emits MOOD on
+# consecutive texts. Keeps stacking under control.
+_MOODLET_COOLDOWN_SECONDS = 30 * 60  # 30 minutes
+_last_moodlet_at = {}  # sim_id -> unix timestamp
+
+
+def _moodlet_on_cooldown(sim_info):
+    import time
+    try:
+        sid = getattr(sim_info, "sim_id", None)
+        if sid is None:
+            return False
+        last = _last_moodlet_at.get(sid)
+        return last is not None and (time.time() - last) < _MOODLET_COOLDOWN_SECONDS
+    except Exception:
+        return False
+
+
+def _mark_moodlet_applied(sim_info):
+    import time
+    try:
+        sid = getattr(sim_info, "sim_id", None)
+        if sid is not None:
+            _last_moodlet_at[sid] = time.time()
+    except Exception:
+        pass
 
 
 def _refresh_milestones_for(contact, recipient_sim):
@@ -456,19 +499,23 @@ def _refresh_milestones_for(contact, recipient_sim):
 
 
 def _apply_mood_from_text(text, recipient=None, is_incoming=False):
-    """Extract the MOOD: tag, apply the matching moodlet to the recipient,
-    and return the cleaned text. Rules:
-      - is_incoming=True (unsolicited auto-fired call/text): apply any mood
-      - is_incoming=False (reply / contact response to player-initiated):
-        only apply if the mood is in _CHARGED_MOODS, so we don't slap a
-        Feeling Happy moodlet on the player for every benign reply.
+    """Extract the MOOD: tag and apply the matching moodlet, with three gates:
+      1. LLM only emits MOOD when the message is genuinely impactful
+         (instructed via prompt -- not every text gets one).
+      2. is_incoming=False (reply): only apply if mood is in _CHARGED_MOODS.
+      3. Per-sim cooldown so back-to-back messages don't stack moodlets.
     """
     clean_text, mood = moodlets.extract_mood_tag(text)
     if mood and recipient is not None:
         try:
             should_apply = is_incoming or mood in _CHARGED_MOODS
-            if should_apply:
-                moodlets.apply_mood(recipient, mood, reason="from incoming text/call" if is_incoming else "from reply")
+            if should_apply and not _moodlet_on_cooldown(recipient):
+                ok = moodlets.apply_mood(
+                    recipient, mood,
+                    reason="from incoming text/call" if is_incoming else "from reply",
+                )
+                if ok:
+                    _mark_moodlet_applied(recipient)
         except Exception:
             pass
     return clean_text

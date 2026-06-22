@@ -77,6 +77,12 @@ Calls and texts show as in-game phone dialogs with the sim's portrait. Click **R
 
 Each sim has a unique voice based on their **age, traits, mood, career, and aspiration**. A Goofball Teen texts completely differently from a Snob Elder. Past interactions with that sim are also included, so they'll reference previous conversations naturally.
 
+**Sims also remember big life events.** When something significant happens in your game — a sim quits their job, gets promoted, has a baby, gets married, ages up — the mod picks it up automatically and references it in calls and texts. Your friend won't congratulate you on a promotion that didn't happen, but they will if it did yesterday.
+
+**Realistic reply delays** — when you text a sim, they "think" for a few seconds before responding instead of replying instantly. Close friends reply fast; lazy or hostile sims drag. Set `reply_delay_enabled = false` to restore instant replies.
+
+**Mood buffs** — when a message is genuinely emotionally significant (big news, a fight, a confession, a flirty escalation), the recipient sim gets a matching "Feeling X" moodlet (Happy / Sad / Angry / Confident / Flirty / Playful / Energized / Focused / Inspired). Routine chats and small talk don't trigger one. There's a 30-minute per-sim cooldown to prevent stacking.
+
 ### General
 | Command | What it does |
 |---|---|
