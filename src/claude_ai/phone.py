@@ -132,6 +132,12 @@ If past chat contradicts the current label, assume a falling-out happened since 
 CURRENT status overrides past tone. By tier:
 - friends / close / best friends: warm, glad to be in touch
 - friendly acquaintances: polite, normal
+- barely know each other: hesitant, confused, off-balance. You met the player \
+  once or twice and barely remember them. Calling them feels random even to you. \
+  Lead with confusion: "Hey... is this still the right number?", "Sorry, this is \
+  awkward — we met at [event], right?", "Hi, I don't know if you remember me but...". \
+  Keep it short and a little stilted. NEVER warm, NEVER familiar. This tier does \
+  NOT apply if a family role is listed — family always remembers family.
 - have some negative history: cool, brief, no warmth
 - actively dislike each other: cold, dismissive, may snipe; no warmth ANYWHERE
 - enemies: OPENLY HOSTILE — cutting, snarky, dismissive, contemptuous. NEVER \
@@ -279,6 +285,13 @@ If past chat contradicts the current label, assume a falling-out happened since 
 CURRENT status overrides past tone. By tier:
 - friends / close / best friends: warm, glad to be in touch
 - friendly acquaintances: polite, normal
+- barely know each other: hesitant, confused, off-balance. You met the player \
+  once or twice and barely remember them. Texting them feels random even to you. \
+  Lead with confusion: "hey... sorry is this [player first name]?", "wait who is \
+  this lol", "is this the right number? we met at [event] right?", "hi! I don't \
+  know if you remember me but...". Short, stilted, a little awkward. NEVER warm, \
+  NEVER familiar. This tier does NOT apply if a family role is listed — family \
+  always remembers family.
 - have some negative history: cool, brief, no warmth
 - actively dislike each other: cold, dismissive, may snipe; no warmth ANYWHERE
 - enemies: OPENLY HOSTILE — cutting, snarky, dismissive, contemptuous. NEVER \
@@ -394,6 +407,13 @@ status overrides past tone. Don't keep being warm because old messages were warm
 By tier:
 - "best friends, very close" / "close friends" / "friends, get along well": warm, easy, glad to hear from them
 - "friendly acquaintances": polite, friendly, normal
+- "barely know each other": HESITANT, CONFUSED. You barely remember {main_name} — \
+  you maybe met once or twice. Receiving this text out of the blue is weird. \
+  Lead with something like "wait who is this", "sorry — is this [their name]? \
+  how'd you get my number?", "hi! we've met right? remind me where...", "do I \
+  know you? sorry brain blank". Be a little stilted and ask for a refresher. \
+  NEVER warm, NEVER familiar, NEVER pretend you remember details you don't. \
+  This tier does NOT apply if a family role is listed — family always knows family.
 - "have some negative history": cool, brief, slightly stilted; no warmth
 - "actively dislike each other": cold, dismissive, short replies, may snipe; no warmth ANYWHERE
 - "enemies": OPENLY HOSTILE. Cutting, snarky, dismissive, may insult or mock. \
@@ -785,25 +805,46 @@ def find_contact_by_name(full_name):
             if contact["name"].lower() == name_lower:
                 return contact
 
-    # Fallback: search the sim manager directly and build a contact dict
+    # Fallback: search the sim manager directly and build a contact dict.
+    # The network search above filters by min_friendship=25, so low-friendship
+    # sims (e.g. -9 acquaintances) never appear there. We still want to surface
+    # those — and crucially we still need their friendship/romance scores so
+    # the "barely know each other" tier applies. Read them directly from the
+    # main sim's relationship tracker before returning.
     try:
         import services
         parts = full_name.strip().split(None, 1)
         first = parts[0].lower()
         last = parts[1].lower() if len(parts) > 1 else ""
 
-        for si in services.sim_info_manager().values():
+        sm = services.sim_info_manager()
+        for si in sm.values():
             if si.first_name.lower() != first:
                 continue
             if last and si.last_name.lower() != last:
                 continue
+
+            friendship = None
+            romance = None
+            status = ""
+            if main_si is not None:
+                try:
+                    rt = main_si.relationship_tracker
+                    entry = sim_context._read_relationship_for_target(rt, si.sim_id, sm)
+                    if entry:
+                        friendship = entry.get("friendship")
+                        romance = entry.get("romance")
+                        status = entry.get("status", "") or ""
+                except Exception:
+                    pass
+
             return {
                 "sim_info": si,
                 "sim_id": si.sim_id,
                 "name": f"{si.first_name} {si.last_name}".strip(),
-                "status": "",
-                "friendship": None,
-                "romance": None,
+                "status": status,
+                "friendship": friendship,
+                "romance": romance,
                 "in_household": False,
             }
     except Exception:
@@ -1799,6 +1840,60 @@ def _get_family_relationship(other_si, contact, recipient=None):
     except Exception:
         pass
 
+    # Last-resort: check bits from the OTHER side of the relationship.
+    # Sims 4 normally writes family bits symmetrically, but saves can drift --
+    # e.g. Francesca's tracker still says "Apollo is my Father" while Apollo's
+    # tracker has dropped the matching "Francesca is my Daughter" bit. By
+    # reading other_si's view of main_si and inverting it, we recover the
+    # relationship without needing to mutate the save.
+    try:
+        other_rt = other_si.relationship_tracker
+        other_bits = other_rt.get_all_bits(main_si.sim_id)
+        if other_bits:
+            other_bit_names = []
+            for bit in other_bits:
+                try:
+                    other_bit_names.append(sim_context._get_trait_name(bit).lower())
+                except Exception:
+                    pass
+            compact = [bn.replace("_", "").replace("-", "") for bn in other_bit_names]
+
+            def other_has_compact(substr):
+                return any(substr in cb for cb in compact)
+
+            def other_any_bit(*keywords):
+                return any(any(kw in bn for kw in keywords) for bn in other_bit_names)
+
+            # If the OTHER sim's tracker says main_si is their parent,
+            # then main_si is the parent => other_si is main_si's child.
+            if other_has_compact("targetisparentof") or other_has_compact("isparentof"):
+                if other_can_be_child_of_main:
+                    return male_or("Son", "Daughter")
+            # If the other sim's tracker says main_si is their child,
+            # then main_si is the child => other_si is the parent.
+            if other_has_compact("targetischildof") or other_has_compact("ischildof"):
+                if other_can_be_parent_of_main:
+                    return male_or("Father", "Mother")
+            # Generic parent bit on the other side, direction inferred by age.
+            if (other_any_bit("parent") and not other_any_bit("grandparent")
+                    and not other_has_compact("inlaw")):
+                if other_is_younger:
+                    return male_or("Son", "Daughter")
+                if other_is_older:
+                    return male_or("Father", "Mother")
+            # Generic child / offspring bit on the other side.
+            if ((other_any_bit("offspring")
+                 or any(("child" in bn and "grandchild" not in bn) for bn in other_bit_names))
+                    and not other_has_compact("inlaw")):
+                if other_is_younger:
+                    return male_or("Son", "Daughter")
+                if other_is_older:
+                    return male_or("Father", "Mother")
+            if other_any_bit("sibling", "brother", "sister"):
+                return male_or("Brother", "Sister")
+    except Exception:
+        pass
+
     return None
 
 
@@ -1921,6 +2016,10 @@ def _friendship_label(score):
     Convert a Sims 4 friendship score to a closeness label.
     Positive scores only indicate degrees of closeness — never tension.
     Tension only appears at NEGATIVE scores.
+
+    Scores between -19 and +9 collapse into "barely know each other" — they
+    represent sims who've met once or twice but never developed a real
+    relationship. Triggers "wait, who is this?" reactions in the prompts.
     """
     if score is None:
         return None
@@ -1930,8 +2029,10 @@ def _friendship_label(score):
         return "close friends"
     if score >= 20:
         return "friends, get along well"
-    if score >= 0:
+    if score >= 10:
         return "friendly acquaintances"
+    if score >= -19:
+        return "barely know each other -- might not remember the player clearly"
     if score >= -40:
         return "have some negative history"
     if score >= -70:
