@@ -45,7 +45,7 @@
     "description": "A free script mod that brings Claude AI to The Sims 4 — generating in-character phone calls, text conversations, story updates, random events, and 3-act storylines live from your household data.",
     "url": "https://morganparadis.github.io/claude-for-sims-4/",
     "downloadUrl": "https://github.com/morganparadis/claude-for-sims-4/releases/latest",
-    "softwareVersion": "1.1.0",
+    "softwareVersion": "1.1.1",
     "author": { "@type": "Person", "name": "morganparadis" },
     "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
     "license": "Open source"
@@ -511,6 +511,18 @@
   <ol class="changelog-list">
 
     <li class="changelog-entry">
+      <div class="changelog-date">June 24, 2026</div>
+      <div class="changelog-body">
+        <h3>Enemies actually act like enemies (v1.1.1)</h3>
+        <ul>
+          <li>Every call, text, and reply now leads with a "current tone" header in the prompt, naming the relationship explicitly (best friends, friends, acquaintances, enemies, etc.) — so the AI can't drift back to warm exchanges when the current relationship has soured.</li>
+          <li>Specifically fixes the case where an enemy sim would still text "congrats!" or "rooting for you" because the journal contained older friendly exchanges.</li>
+          <li>Works in both directions: close friends now consistently sound warm instead of flat just because past entries happened to be terse.</li>
+        </ul>
+      </div>
+    </li>
+
+    <li class="changelog-entry">
       <div class="changelog-date">June 22, 2026</div>
       <div class="changelog-body">
         <h3>"Wait, who is this?"</h3>
@@ -540,17 +552,6 @@
         <ul>
           <li>Sims now "think" before texting back instead of replying instantly. Delay scales by friendship (best friends fast, enemies slow) and traits (Lazy/Loner slow, Active/Outgoing fast). Defaults to 15–90 seconds.</li>
           <li>Configurable in <code>claude_config.cfg</code> — set <code>reply_delay_enabled = false</code> for the old instant behavior.</li>
-        </ul>
-      </div>
-    </li>
-
-    <li class="changelog-entry">
-      <div class="changelog-date">June 22, 2026</div>
-      <div class="changelog-body">
-        <h3>Moodlets are back (the right way)</h3>
-        <ul>
-          <li>Genuinely impactful calls and texts now apply a clean "Feeling X" moodlet to your sim — happy, sad, angry, confident, flirty, playful, energized, focused, inspired. No more rogue "New Baby!" or "Workout!" buffs.</li>
-          <li>Routine check-ins and small talk don't trigger a moodlet — only big news, fights, confessions, or flirty escalations do. Plus a 30-minute per-sim cooldown so moodlets don't stack.</li>
         </ul>
       </div>
     </li>
