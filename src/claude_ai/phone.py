@@ -897,6 +897,102 @@ def _log_picker(message):
         pass
 
 
+def _tone_override_block(contact, recipient=None):
+    """Build a top-of-prompt tone affirmation for every friendship tier.
+
+    The system prompt describes tone tiers in detail, but the model
+    weighs the journal's recent concrete content above abstract rules
+    -- so warm past exchanges can override an 'enemies' label, and
+    flat past exchanges can override a 'close friends' label. Putting
+    the *current* tone at the very top of the USER message makes it
+    the freshest, most-prominent instruction and prevents drift in
+    either direction.
+
+    Family roles override the friendship tone (a parent texting a child
+    still texts like a parent regardless of score), so for the
+    'barely know each other' tier we flag that explicitly. For other
+    tiers the system-prompt rule about family-role-overrides handles it."""
+    try:
+        score = contact.get("friendship")
+        if score is None:
+            score = 0
+    except Exception:
+        return ""
+    name = contact.get("name", "this sim")
+    recipient_name = "the player"
+    try:
+        if recipient is not None:
+            recipient_name = recipient.first_name or recipient_name
+    except Exception:
+        pass
+
+    header = "!!! CURRENT TONE !!!\n"
+
+    if score >= 75:
+        return (
+            f"{header}"
+            f"{name} and {recipient_name} are BEST FRIENDS, very close.\n"
+            f"Warm, easy, glad to be in touch. Inside-joke energy is welcome.\n\n"
+        )
+    if score >= 45:
+        return (
+            f"{header}"
+            f"{name} and {recipient_name} are CLOSE FRIENDS.\n"
+            f"Warm and easy. Genuinely happy to hear from each other.\n\n"
+        )
+    if score >= 20:
+        return (
+            f"{header}"
+            f"{name} and {recipient_name} are FRIENDS who get along well.\n"
+            f"Friendly and easy, no formality.\n\n"
+        )
+    if score >= 10:
+        return (
+            f"{header}"
+            f"{name} and {recipient_name} are FRIENDLY ACQUAINTANCES.\n"
+            f"Polite, friendly, normal. Not super close, not cold.\n\n"
+        )
+    if score >= -19:
+        return (
+            f"{header}"
+            f"{name} and {recipient_name} BARELY KNOW each other.\n"
+            f"Tone: hesitant, confused, off-balance. Lead with something like\n"
+            f"\"wait who is this\", \"sorry is this {recipient_name}?\",\n"
+            f"\"do I know you?\", \"hi! we've met right? remind me where...\".\n"
+            f"NEVER warm, NEVER familiar, NEVER pretend you remember details you don't.\n"
+            f"EXCEPTION: if a family role is in the sender info (Father / Mother /\n"
+            f"Sister / Son / etc.), ignore this tier and text like family. Family\n"
+            f"always remembers family regardless of friendship score.\n\n"
+        )
+    if score >= -40:
+        return (
+            f"{header}"
+            f"{name} and {recipient_name} have NEGATIVE HISTORY.\n"
+            f"Tone: cool, brief, stilted. No warmth in this message.\n"
+            f"Past warm exchanges in the journal are OBSOLETE.\n\n"
+        )
+    if score >= -70:
+        return (
+            f"{header}"
+            f"{name} ACTIVELY DISLIKES {recipient_name}.\n"
+            f"Tone: COLD, DISMISSIVE, may snipe. No warmth, no enthusiasm,\n"
+            f"no congratulations. Short, sharp replies.\n"
+            f"Any warm content in the journal is OBSOLETE -- assume things soured.\n\n"
+        )
+    return (
+        f"!!! HARD TONE OVERRIDE !!!\n"
+        f"{name} and {recipient_name} are CURRENTLY ENEMIES.\n"
+        f"This message MUST be OPENLY HOSTILE: cutting, sarcastic, contemptuous, dismissive.\n"
+        f"FORBIDDEN phrasings -- DO NOT use ANY of these or variants:\n"
+        f"  congrats / congratulations / proud of you / happy for you / solid work / "
+        f"good for you (sincere) / rooting for you / hope you're well / miss you / "
+        f"take care / love you / glad to hear / nice to hear / good to hear\n"
+        f"Any warm exchanges in the journal happened BEFORE the falling-out. They are OBSOLETE.\n"
+        f"If responding to good news, be SARCASTIC or COMPETITIVE, never supportive.\n"
+        f"Open with something cold and cutting -- no greeting, no warmth.\n\n"
+    )
+
+
 def _pick_random_relationship_sim(recipient=None):
     """Pick a random non-household sim from the recipient's relationship network.
     Hard filters: pets, ghosts (when disabled in config), sims currently on
@@ -2181,6 +2277,7 @@ use a generic reference like 'a coworker', 'my neighbor', 'this friend of mine' 
     recipient_block = _describe_recipient(recipient, contact=contact)
 
     prompt = (
+        f"{_tone_override_block(contact, recipient=recipient)}"
         f"Caller info:\n{rel_desc}{history_block}{mutual_block}\n\n"
         f"{recipient_block}\n\n"
         f"They are calling {recipient_name}{_location_context(recipient, contact)}.{_season_context()}\n\n"
@@ -2253,6 +2350,7 @@ use a generic reference like 'a coworker', 'my neighbor', 'this friend of mine' 
     recipient_block = _describe_recipient(recipient, contact=contact)
 
     prompt = (
+        f"{_tone_override_block(contact, recipient=recipient)}"
         f"Sender info:\n{rel_desc}{history_block}{mutual_block}\n\n"
         f"{recipient_block}\n\n"
         f"They are texting {recipient_name}{_location_context(recipient, contact)}.{_season_context()}\n\n"
@@ -2334,6 +2432,7 @@ def generate_reply(player_message, callback=None, output=None):
 
 
     prompt = (
+        f"{_tone_override_block(contact, recipient=recipient)}"
         f"Relationship info:\n{rel_desc}{history_block}{mutual_block}\n\n"
         f"Conversation so far:\n{convo_text}\n\n"
         f"Write {other_name}'s reply (1-3 short text messages)."
@@ -2422,6 +2521,7 @@ def send_text(contact, player_message, callback=None, output=None):
 
 
     prompt = (
+        f"{_tone_override_block(contact, recipient=main_si)}"
         f"Relationship info:\n{rel_desc}{history_block}{mutual_block}\n\n"
         f"{main_name} just texted {other_name}: \"{player_message}\"\n\n"
         f"Write {other_name}'s reply (1-3 short text messages). "
