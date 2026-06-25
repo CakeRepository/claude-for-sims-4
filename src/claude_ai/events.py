@@ -46,28 +46,82 @@ def _sim_id(sim_info):
             return None
 
 
+def _clean_event_name(raw):
+    """Strip Sims-internal class-name noise from an event label.
+
+    Tuned drama-node subclasses look like 'playerPlannedDramaNode Funeral'
+    or 'PlayerPlannedDramaNode_Wedding'. We want just the event-type
+    suffix ('Funeral', 'Wedding'). When the whole name IS the drama-node
+    wrapper, we strip 'DramaNode' and titlecase what's left."""
+    import re
+    if not raw:
+        return ""
+    # If a "...DramaNode" segment appears followed by the real event
+    # type, take everything after it. Handles snake/camel/space joiners.
+    m = re.search(r'[Dd]rama\s*[Nn]ode[\s_]+(.+)$', raw)
+    if m:
+        return m.group(1).strip().title()
+    # Otherwise strip a trailing "DramaNode" / "Drama Node" if present
+    stripped = re.sub(r'[\s_]*[Dd]rama\s*[Nn]ode$', '', raw)
+    # camelCase -> "camel Case"
+    stripped = re.sub(r'(?<=[a-z])(?=[A-Z])', ' ', stripped)
+    stripped = stripped.replace('_', ' ').strip()
+    return stripped.title() if stripped else ""
+
+
 def _resolve_event_name(event):
-    """Best-effort plain-string name for a calendar event. Falls back to
-    a tidy class name if the localized display data isn't available."""
+    """Best-effort plain-string name for a calendar event."""
+    raw = None
     try:
         ud = getattr(event, "ui_display_data", None)
         if ud is not None:
-            raw = getattr(ud, "name", None)
-            if raw is not None:
-                resolved = sim_context._resolve_localized_string(raw)
-                if resolved:
-                    return resolved
+            name_attr = getattr(ud, "name", None)
+            if name_attr is not None:
+                raw = sim_context._resolve_localized_string(name_attr)
     except Exception:
         pass
-    # Fallback: class name (e.g. "PlayerPlannedDramaNode" -> "Planned event")
+    cleaned = _clean_event_name(raw or "")
+    if cleaned:
+        return cleaned
+    # Fallback: class name
     try:
         cls_name = type(event).__name__
-        if cls_name.endswith("DramaNode"):
-            cls_name = cls_name[:-len("DramaNode")]
-        cls_name = cls_name.replace("_", " ").strip()
-        return cls_name or "Event"
+        cleaned = _clean_event_name(cls_name)
+        if cleaned:
+            return cleaned
     except Exception:
-        return "Event"
+        pass
+    return "Event"
+
+
+# Tone hints for events where the wrong register would be jarring (funeral
+# texted casually, wedding texted flatly). Keyed by case-insensitive
+# substring of the resolved event name. Appended verbatim to the event
+# line so the model sees it right next to the event description.
+_EVENT_TONE_HINTS = {
+    "funeral":      "(solemn tone -- this is a grieving occasion, not a casual hangout)",
+    "memorial":     "(solemn tone -- this is a grieving occasion)",
+    "wake":         "(solemn tone -- this is a grieving occasion)",
+    "wedding":      "(warm, celebratory tone)",
+    "birthday":     "(celebratory tone)",
+    "graduation":   "(celebratory tone)",
+    "anniversary":  "(warm, celebratory tone)",
+    "baby shower":  "(warm, celebratory tone)",
+    "housewarming": "(warm, casual celebratory tone)",
+    "dinner party": "(social, casual tone)",
+    "game night":   "(casual, fun tone)",
+}
+
+
+def _tone_hint(event_name):
+    """Return a tone hint string for an event, or '' if none applies."""
+    if not event_name:
+        return ""
+    lower = event_name.lower()
+    for keyword, hint in _EVENT_TONE_HINTS.items():
+        if keyword in lower:
+            return hint
+    return ""
 
 
 def _format_time_until(start_time, now):
@@ -179,8 +233,11 @@ def format_shared_events_for_prompt(recipient_sim_info, contact_sim_info):
         return ""
     lines = [
         "Upcoming events you are BOTH attending (feel free to reference these "
-        "naturally; do not invent events not listed here):"
+        "naturally; do not invent events not listed here -- and match the tone "
+        "hint when one is given):"
     ]
     for ev in events:
-        lines.append(f"  - {ev['name']} ({ev['when']})")
+        hint = _tone_hint(ev["name"])
+        hint_part = f" {hint}" if hint else ""
+        lines.append(f"  - {ev['name']} ({ev['when']}){hint_part}")
     return "\n".join(lines)
