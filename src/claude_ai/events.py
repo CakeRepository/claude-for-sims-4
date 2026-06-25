@@ -299,32 +299,29 @@ def get_shared_upcoming_events(recipient_sim_info, contact_sim_info, max_events=
 
     data_map = getattr(cal, "_event_data_map", None)
     if not data_map:
-        _log(f"Lookup r={recipient_id} c={contact_id}: empty _event_data_map.")
         return []
 
-    _log(
-        f"Lookup r={recipient_id} c={contact_id}: scanning "
-        f"{len(data_map)} calendar entries."
-    )
+    # Summary counters so we don't spam the log with one entry per drama node.
+    counts = {"scanned": 0, "past": 0, "attendee_mismatch": 0, "kept": 0, "errors": 0}
+    kept_lines = []  # only KEPT events get a line each
 
     results = []
     try:
         for event_ref in data_map.values():
+            counts["scanned"] += 1
             try:
                 event = event_ref() if callable(event_ref) else event_ref
             except Exception:
+                counts["errors"] += 1
                 continue
             if event is None:
-                _log("  - entry: weakref dead, skipped")
                 continue
-            cls_name = type(event).__name__
             try:
                 start = event.get_calendar_start_time()
-            except Exception as e:
-                _log(f"  - {cls_name}: get_calendar_start_time failed: {e}")
+            except Exception:
+                counts["errors"] += 1
                 continue
             if start is None:
-                _log(f"  - {cls_name}: start=None, skipped")
                 continue
 
             # Holidays are world-level and have no invitee list -- both
@@ -340,51 +337,31 @@ def get_shared_upcoming_events(recipient_sim_info, contact_sim_info, max_events=
             except Exception:
                 pass
 
-            # Diagnostic dump for this entry
-            try:
-                start_ticks = start.absolute_ticks() if hasattr(start, "absolute_ticks") else "?"
-                now_ticks = now.absolute_ticks() if hasattr(now, "absolute_ticks") else "?"
-                delta = start - now
-                delta_min = (
-                    int(delta.in_minutes()) if hasattr(delta, "in_minutes")
-                    else int(delta.in_hours() * 60) if hasattr(delta, "in_hours")
-                    else "?"
-                )
-            except Exception:
-                start_ticks = now_ticks = delta_min = "?"
-
-            try:
-                sims = event.get_calendar_sims() or ()
-                attendee_ids = [_sim_id(si) for si in sims if si is not None]
-            except Exception as e:
-                _log(f"  - {cls_name}: get_calendar_sims failed: {e}")
-                attendee_ids = []
-
-            _log(
-                f"  - {cls_name}: holiday={is_holiday}, start={start_ticks}, "
-                f"now={now_ticks}, delta_min={delta_min}, "
-                f"attendees={attendee_ids}, want=[{recipient_id},{contact_id}]"
-            )
-
             # Past events are irrelevant -- once the event has started,
             # both sims should be at the lot together and would not be
             # texting each other across it.
             try:
                 if start < now:
-                    _log("    -> dropped (past/in-progress)")
+                    counts["past"] += 1
                     continue
             except Exception:
                 pass
 
             if not is_holiday:
-                attendee_set = set(attendee_ids)
+                try:
+                    sims = event.get_calendar_sims() or ()
+                    attendee_set = {_sim_id(si) for si in sims if si is not None}
+                except Exception:
+                    counts["errors"] += 1
+                    continue
                 if recipient_id not in attendee_set or contact_id not in attendee_set:
-                    _log("    -> dropped (one or both sims not in attendee list)")
+                    counts["attendee_mismatch"] += 1
                     continue
 
             name = _resolve_event_name(event)
             when = _format_time_until(start, now) or "soon"
-            _log(f"    -> KEPT as '{name}' ({when})")
+            counts["kept"] += 1
+            kept_lines.append(f"    KEPT: '{name}' ({when}, holiday={is_holiday})")
             results.append({
                 "name": name,
                 "when": when,
@@ -394,6 +371,15 @@ def get_shared_upcoming_events(recipient_sim_info, contact_sim_info, max_events=
     except Exception as e:
         _log(f"Iter error: {type(e).__name__}: {e}")
         return results
+
+    _log(
+        f"Lookup r={recipient_id} c={contact_id}: "
+        f"scanned={counts['scanned']}, past={counts['past']}, "
+        f"attendee_mismatch={counts['attendee_mismatch']}, "
+        f"kept={counts['kept']}, errors={counts['errors']}"
+    )
+    for line in kept_lines:
+        _log(line)
 
     # Sort by soonest first and cap
     try:
