@@ -1130,9 +1130,18 @@ def _describe_recipient(recipient_sim, contact=None):
 
     # Surface any recent milestones for the recipient so the caller can
     # plausibly reference them ("hey congrats on the promotion!").
+    # Pass the caller's sim_id as contact_id so each milestone is only
+    # surfaced to that contact ONCE -- prevents the same sim asking about
+    # the same job-quit / promotion across multiple calls.
     try:
         from . import milestones as _milestones
-        mblock = _milestones.format_for_prompt(recipient_sim)
+        contact_sim_id = None
+        if contact is not None:
+            try:
+                contact_sim_id = contact.get("sim_id") if isinstance(contact, dict) else None
+            except Exception:
+                pass
+        mblock = _milestones.format_for_prompt(recipient_sim, contact_id=contact_sim_id)
         if mblock:
             # Re-label so the LLM understands these are events in the
             # recipient's life, not the caller's.
