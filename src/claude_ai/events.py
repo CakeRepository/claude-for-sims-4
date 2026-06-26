@@ -261,6 +261,47 @@ def _tone_hint(event_name):
     return ""
 
 
+# Sims 4 SeasonType enum order (from seasons.seasons_enums.SeasonType):
+# SUMMER=0, FALL=1, WINTER=2, SPRING=3. We carry an index->name table so
+# we don't have to import the enum (which may not be available pre-Seasons).
+_SEASON_NAMES = ["Summer", "Fall", "Winter", "Spring"]
+
+
+def _season_for_time(target_time):
+    """Return the season-name that `target_time` falls in, or None if the
+    season service isn't available (Seasons pack not installed, or save
+    not loaded yet). Uses current-season + elapsed-season math so we
+    don't have to know future season boundaries directly.
+
+    Sims 4 default = 1 sim week per season (7 sim days); the player can
+    set 7/14/21/28-day seasons in gameplay options. We read whatever the
+    current season service has tuned and roll forward."""
+    try:
+        import services
+        ss = services.season_service()
+        if ss is None:
+            return None
+        current_season = getattr(ss, "season", None) or getattr(ss, "_season", None)
+        season_content = getattr(ss, "_season_content", None)
+        season_span = getattr(ss, "_season_length_span", None)
+        if current_season is None or season_content is None or season_span is None:
+            return None
+        season_start = getattr(season_content, "start_time", None)
+        if season_start is None:
+            return None
+        delta = target_time - season_start
+        delta_ticks = delta.in_ticks() if hasattr(delta, "in_ticks") else None
+        span_ticks = season_span.in_ticks() if hasattr(season_span, "in_ticks") else None
+        if not delta_ticks or not span_ticks:
+            return None
+        seasons_advanced = int(delta_ticks // span_ticks)
+        current_idx = int(getattr(current_season, "value", current_season))
+        target_idx = (current_idx + seasons_advanced) % len(_SEASON_NAMES)
+        return _SEASON_NAMES[target_idx]
+    except Exception:
+        return None
+
+
 def _format_time_until(start_time, now):
     """Return a short human-readable 'in X hours' / 'tomorrow' string.
     Returns None if the time math fails or the event is in the past."""
@@ -383,13 +424,15 @@ def get_shared_upcoming_events(recipient_sim_info, contact_sim_info, max_events=
                 counts["unnamed"] += 1
                 continue
             when = _format_time_until(start, now) or "soon"
+            season = _season_for_time(start)
             counts["kept"] += 1
-            kept_lines.append(f"    KEPT: '{name}' ({when}, holiday={is_holiday})")
+            kept_lines.append(f"    KEPT: '{name}' ({when}, holiday={is_holiday}, season={season})")
             results.append({
                 "name": name,
                 "when": when,
                 "start": start,
                 "is_holiday": is_holiday,
+                "season": season,
             })
     except Exception as e:
         _log(f"Iter error: {type(e).__name__}: {e}")
@@ -430,5 +473,10 @@ def format_shared_events_for_prompt(recipient_sim_info, contact_sim_info):
         hint = _tone_hint(ev["name"])
         hint_part = f" {hint}" if hint else ""
         kind = "holiday" if ev.get("is_holiday") else "event you are both attending"
-        lines.append(f"  - {ev['name']} ({kind}, {ev['when']}){hint_part}")
+        season = ev.get("season")
+        # Include the season the event falls in. In Sims 4 a "week" is
+        # one in-game season, so "in 2 weeks" can mean "two seasons from
+        # now"; the season label keeps the model's framing accurate.
+        season_part = f", {season}" if season else ""
+        lines.append(f"  - {ev['name']} ({kind}, {ev['when']}{season_part}){hint_part}")
     return "\n".join(lines)
