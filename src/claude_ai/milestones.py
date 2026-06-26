@@ -26,6 +26,10 @@ from . import config, sim_context
 
 _SNAPSHOTS_FILENAME = "ClaudeAI_SimSnapshots.json"
 _MILESTONES_FILENAME = "ClaudeAI_Milestones.json"
+# Per-contact tracker of which milestones each contact has already had
+# surfaced to them, so the same sim doesn't keep asking the player about
+# the same job-quit / promotion / breakup across multiple calls.
+_REFERENCES_FILENAME = "ClaudeAI_MilestoneRefs.json"
 
 # Cap the milestones log so it doesn't grow unbounded.
 _MAX_MILESTONES = 200
@@ -109,6 +113,74 @@ def _save_milestones(entries):
     try:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(trimmed, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def _references_path():
+    cfg = config.get_config_path()
+    if cfg:
+        return os.path.join(os.path.dirname(cfg), _REFERENCES_FILENAME)
+    return os.path.join(os.path.expanduser("~"), "Documents", _REFERENCES_FILENAME)
+
+
+def _load_references():
+    """Returns nested dict: {contact_id_str: {recipient_id_str: [timestamp, ...]}}."""
+    path = _references_path()
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_references(refs):
+    path = _references_path()
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(refs, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def _referenced_timestamps(contact_id, recipient_id):
+    """Return the set of milestone timestamps `contact_id` has already
+    had surfaced about `recipient_id`."""
+    if contact_id is None or recipient_id is None:
+        return set()
+    refs = _load_references()
+    inner = refs.get(str(contact_id), {})
+    return set(inner.get(str(recipient_id), []))
+
+
+def mark_referenced(contact_id, recipient_id, milestone_entries):
+    """Record that `contact_id` has been shown these milestones about
+    `recipient_id`, so we don't keep re-surfacing the same ones in
+    future prompts. Idempotent."""
+    if contact_id is None or recipient_id is None or not milestone_entries:
+        return
+    timestamps = []
+    for e in milestone_entries:
+        if isinstance(e, dict):
+            ts = e.get("timestamp")
+        else:
+            ts = e
+        if ts:
+            timestamps.append(ts)
+    if not timestamps:
+        return
+    try:
+        refs = _load_references()
+        ckey = str(contact_id)
+        rkey = str(recipient_id)
+        contact_block = refs.setdefault(ckey, {})
+        existing = set(contact_block.get(rkey, []))
+        existing.update(timestamps)
+        contact_block[rkey] = sorted(existing)
+        _save_references(refs)
     except Exception:
         pass
 
@@ -446,35 +518,51 @@ def scan_sims(sim_infos):
 # Prompt formatting
 # ---------------------------------------------------------------------------
 
-def get_recent_for_sim(sim_id, days=_PROMPT_RECENCY_DAYS, limit=_PROMPT_MILESTONES_PER_SIM):
-    """Return a list of recent milestone dicts for one sim, newest first."""
+def get_recent_for_sim(sim_id, days=_PROMPT_RECENCY_DAYS, limit=_PROMPT_MILESTONES_PER_SIM,
+                       exclude_for_contact=None):
+    """Return a list of recent milestone dicts for one sim, newest first.
+
+    If `exclude_for_contact` is provided, milestones that contact has
+    already had surfaced are filtered out -- so the same contact doesn't
+    keep asking about the same job-quit / promotion across calls."""
     sid_key = str(sim_id)
     cutoff = datetime.datetime.now() - datetime.timedelta(days=days)
     entries = _load_milestones()
+    skip_ts = _referenced_timestamps(exclude_for_contact, sim_id)
     filtered = []
     for e in entries:
         if e.get("sim_id") != sid_key:
             continue
+        ts_str = e.get("timestamp")
         try:
-            ts = datetime.datetime.fromisoformat(e["timestamp"])
+            ts = datetime.datetime.fromisoformat(ts_str)
             if ts < cutoff:
                 continue
         except Exception:
+            continue
+        if ts_str in skip_ts:
             continue
         filtered.append(e)
     return list(reversed(filtered))[:limit]
 
 
-def format_for_prompt(sim_info):
-    """Build the 'Recent in their life' block for a sim, or empty string if none."""
+def format_for_prompt(sim_info, contact_id=None, mark_seen=True):
+    """Build the 'Recent in their life' block for a sim, or empty string if none.
+
+    When `contact_id` is provided, milestones that contact has already
+    been told about are skipped. If `mark_seen` is True, the milestones
+    that DO get surfaced are recorded against this contact so they won't
+    appear again in future prompts.
+    """
     try:
         sid = _safe(sim_info, "sim_id", None)
         if sid is None:
             return ""
-        events = get_recent_for_sim(sid)
+        events = get_recent_for_sim(sid, exclude_for_contact=contact_id)
         if not events:
             return ""
         lines = ["Recent in their life:"]
+        surfaced = []
         for e in events:
             desc = e.get("description", "").strip()
             if not desc:
@@ -484,8 +572,11 @@ def format_for_prompt(sim_info):
             except Exception:
                 date = "recently"
             lines.append(f"  - [{date}] {desc}")
+            surfaced.append(e)
         if len(lines) == 1:
             return ""
+        if mark_seen and contact_id is not None and surfaced:
+            mark_referenced(contact_id, sid, surfaced)
         return "\n".join(lines)
     except Exception:
         return ""
