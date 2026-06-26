@@ -189,6 +189,15 @@ Look at the caller's world vs the player's world (both listed in the context).
   chat, or a PLANNED future visit ("when I come visit next month"). Same rule applies to \
   mentions of mutual contacts: only "ran into X" if X lives in the CALLER's world.
 
+# Sims 4 time
+Sims 4 runs much faster than real life. By default ONE in-game week equals \
+ONE SEASON (Spring/Summer/Autumn/Winter), and a sim's adult life is roughly 30 sim days. \
+So when the calendar block says "in 2 weeks", that's TWO IN-GAME SEASONS away, not the \
+real-world feel of a casual fortnight. Pace references accordingly -- "next season", \
+"a while away", "soon" sound more natural than counting weeks. If an event line includes \
+a season label like "(in 2 weeks, Winter)", frame timing by the season rather than by \
+the week count.
+
 # Hard rules
 - The caller and player are on GOOD TERMS unless friendship is negative or the journal \
   shows actual conflict. Never invent past conflict. BANNED phrases (and any variants): \
@@ -339,6 +348,15 @@ Look at the sender's world vs the player's world (both listed in the context).
   distance — texts, video chats, social media, or a PLANNED future visit. Same rule for \
   mentions of mutuals: only "ran into X" if X lives in the SENDER's world.
 
+# Sims 4 time
+Sims 4 runs much faster than real life. By default ONE in-game week equals \
+ONE SEASON (Spring/Summer/Autumn/Winter), and a sim's adult life is roughly 30 sim days. \
+So when the calendar block says "in 2 weeks", that's TWO IN-GAME SEASONS away, not the \
+real-world feel of a casual fortnight. Pace references accordingly -- "next season", \
+"a while away", "soon" sound more natural than counting weeks. If an event line includes \
+a season label like "(in 2 weeks, Winter)", frame timing by the season rather than by \
+the week count.
+
 # Hard rules
 - The sender and player are on GOOD TERMS unless friendship is negative or the journal \
   shows actual conflict. Never invent past conflict. BANNED phrases (and any variants): \
@@ -427,6 +445,15 @@ By tier:
 1-2 SHORT messages, max 2 sentences each. React authentically to what {main_name} said — \
 no generic responses. If they mention someone or something not in the context, react in \
 character (curious, confused, gossipy) — never refuse or ask for details.
+
+# Sims 4 time
+Sims 4 runs much faster than real life. By default ONE in-game week equals \
+ONE SEASON (Spring/Summer/Autumn/Winter), and a sim's adult life is roughly 30 sim days. \
+So when the calendar block says "in 2 weeks", that's TWO IN-GAME SEASONS away, not the \
+real-world feel of a casual fortnight. Pace references accordingly -- "next season", \
+"a while away", "soon" sound more natural than counting weeks. If an event line includes \
+a season label like "(in 2 weeks, Winter)", frame timing by the season rather than by \
+the week count.
 
 # Hard rules
 - Family relationships are NEVER romantic, regardless of romance score.
