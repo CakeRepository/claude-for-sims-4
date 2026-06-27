@@ -15,7 +15,7 @@ Commands (open cheat console with Ctrl+Shift+C):
 """
 
 MOD_NAME = "Claude AI for The Sims 4"
-MOD_VERSION = "1.1.0"
+MOD_VERSION = "2.0.0"
 
 
 def _log(message):
@@ -30,6 +30,57 @@ def _log(message):
         pass
 
 
+def _parse_semver(v):
+    """Parse 'v1.2.3' or '1.2.3' into a tuple for comparison. Bad input -> (0,0,0)."""
+    try:
+        parts = v.strip().lstrip("v").split(".")
+        return tuple(int(p) for p in parts[:3])
+    except (ValueError, AttributeError):
+        return (0, 0, 0)
+
+
+def _check_for_update():
+    """Hit the GitHub Releases API and return the latest version tag string
+    (e.g. '1.0.1') if it's newer than MOD_VERSION. Returns None if up-to-date,
+    network fails, or anything else goes wrong -- never raises."""
+    import subprocess, json, sys
+    try:
+        startupinfo = None
+        if sys.platform == "win32":
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = 0
+        result = subprocess.run(
+            [
+                "curl", "-s", "-L",
+                "-H", "Accept: application/vnd.github+json",
+                "-H", "User-Agent: ClaudeAI-Sims4-Mod",
+                "https://api.github.com/repos/morganparadis/claude-for-sims-4/releases/latest",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            startupinfo=startupinfo,
+        )
+        if result.returncode != 0:
+            _log(f"Update check: curl exited {result.returncode}")
+            return None
+        data = json.loads(result.stdout)
+        tag = data.get("tag_name", "")
+        if not tag:
+            return None
+        latest = _parse_semver(tag)
+        current = _parse_semver(MOD_VERSION)
+        if latest > current:
+            _log(f"Update check: newer version available ({tag} vs current {MOD_VERSION}).")
+            return tag.lstrip("v")
+        _log(f"Update check: up to date ({MOD_VERSION}).")
+        return None
+    except Exception as e:
+        _log(f"Update check failed: {type(e).__name__}: {e}")
+        return None
+
+
 try:
     _log("Starting mod load...")
 
@@ -39,6 +90,17 @@ try:
     from . import auto_events
 
     auto_events.start()  # starts only if auto_events_enabled = true in config
+
+    # Wire up phone-UI injection BEFORE object tunings finish loading.
+    # The companion .package supplies the interaction tunings (which are
+    # PieMenuCategory + SuperInteraction in the game's internal type system,
+    # but they target the phone wheel UI); this hook appends them to the
+    # sim's affordance list at load complete.
+    try:
+        from . import phone_ui_injection
+        phone_ui_injection.register()
+    except Exception as _e:
+        _log(f"phone_ui_injection.register failed: {type(_e).__name__}: {_e}")
 
     _log("All modules imported, commands registered.")
 
@@ -72,13 +134,30 @@ try:
                 if not client or not getattr(client, "active_sim", None):
                     continue
 
-                from . import notifications, config
+                from . import notifications, config, milestones
                 _log(f"Game client ready (attempt {attempt + 1}), showing startup notification.")
+
+                # Scan the household + relationship network for life events
+                # that happened since last play session. Runs on its own
+                # daemon thread; non-blocking.
+                milestones.start_background_scan()
+
+                # Check for a newer release on GitHub. Short timeout so the
+                # popup doesn't hang waiting on a slow network.
+                latest = _check_for_update()
+                update_line = ""
+                if latest:
+                    update_line = (
+                        f"\n\n** UPDATE AVAILABLE: v{latest} **\n"
+                        f"Download at morganparadis.github.io/claude-for-sims-4/"
+                    )
+
                 if config.is_configured():
                     body = (
                         f"v{MOD_VERSION} ready!\n"
                         f"Model: {config.get_default_model()}\n"
                         f"Type 'claude.status' in the cheat console for all commands."
+                        f"{update_line}"
                     )
                     notifications.show(MOD_NAME, body)
                 else:
@@ -86,6 +165,7 @@ try:
                         f"v{MOD_VERSION} loaded but NOT configured.\n"
                         f"Edit claude_config.cfg and add your API key,\n"
                         f"then type 'claude.reload' in the cheat console."
+                        f"{update_line}"
                     )
                     notifications.show(MOD_NAME, body)
                 return

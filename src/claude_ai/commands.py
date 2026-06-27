@@ -130,6 +130,46 @@ try:
             output("[Claude AI] fire_now() raised an exception -- see log.")
 
     # -------------------------------------------------------------------------
+    # Moodlet investigation (debug)
+    # -------------------------------------------------------------------------
+
+    @sims4.commands.Command("claude.dumpbuffs", command_type=sims4.commands.CommandType.Live)
+    def cmd_dump_buffs(keyword: str = None, _connection=None):
+        """List every loaded buff class whose name contains <keyword> --
+        writes results to Documents/ClaudeAI_BuffList.txt for investigation."""
+        from . import moodlets
+        output = sims4.commands.CheatOutput(_connection)
+        if not keyword:
+            output("[Claude AI] Usage: claude.dumpbuffs <keyword>")
+            output("[Claude AI] e.g. claude.dumpbuffs cheerful")
+            output("[Claude AI] e.g. claude.dumpbuffs feeling")
+            return
+        count = moodlets.dump_buffs_matching(keyword)
+        output(f"[Claude AI] Found {count} buff(s) matching '{keyword}'. See Documents/ClaudeAI_BuffList.txt")
+
+    @sims4.commands.Command("claude.testmoodlet", command_type=sims4.commands.CommandType.Live)
+    def cmd_test_moodlet(mood: str = None, _connection=None):
+        """Try to apply a generic moodlet to the active sim for testing.
+        Logs the outcome and reports success/failure in the console."""
+        from . import moodlets
+        output = sims4.commands.CheatOutput(_connection)
+        if not mood:
+            output("[Claude AI] Usage: claude.testmoodlet <emotion>")
+            output("[Claude AI] Supported: happy, sad, angry, confident, playful, flirty")
+            return
+        active = sim_context.get_active_sim()
+        sim_info = active.sim_info if active else None
+        if not sim_info:
+            output("[Claude AI] No active sim -- enter live mode in a household first.")
+            return
+        ok = moodlets.apply_mood(sim_info, mood, reason="manual test via claude.testmoodlet")
+        if ok:
+            output(f"[Claude AI] Applied a '{mood}' moodlet to {sim_info.first_name}. Check their moodlet panel.")
+        else:
+            output(f"[Claude AI] Could not apply '{mood}' -- see ClaudeAI_Log.txt.")
+            output(f"[Claude AI] Try: claude.dumpbuffs {mood}  -- then claude.dumpbuffs feeling")
+
+    # -------------------------------------------------------------------------
     # Dialogue
     # -------------------------------------------------------------------------
 
@@ -395,6 +435,67 @@ try:
     # -------------------------------------------------------------------------
     # Debug
     # -------------------------------------------------------------------------
+
+    @sims4.commands.Command("claude.dumpphone", command_type=sims4.commands.CommandType.Live)
+    def cmd_dumpphone(_connection=None):
+        """Diagnostic: dump what the game thinks the active sim's
+        phone affordances are right now. Writes to BOTH the cheat
+        console and Documents/ClaudeAI_Log.txt under [dumpphone]."""
+        out_console = sims4.commands.CheatOutput(_connection)
+        import os, datetime
+        log_path = os.path.join(os.path.expanduser("~"), "Documents", "ClaudeAI_Log.txt")
+
+        def out(msg):
+            try:
+                out_console(msg)
+            except Exception:
+                pass
+            try:
+                ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                with open(log_path, "a", encoding="utf-8") as f:
+                    f.write(f"[{ts}] [dumpphone] {msg}\n")
+            except Exception:
+                pass
+
+        try:
+            active = sim_context.get_active_sim()
+            sim = active if active is not None else None
+            sim_info = getattr(sim, 'sim_info', None)
+            if sim is None or sim_info is None:
+                out("no active sim")
+                return
+            out(f"sim: {sim_info.first_name} {sim_info.last_name}")
+
+            phone_affs = list(getattr(sim, "_phone_affordances", ()) or ())
+            out(f"sim._phone_affordances: {len(phone_affs)} entries")
+
+            # The key question: is our Claude_PhoneMenu in the runtime list?
+            ours_present = False
+            seen_categories = {}
+            for a in phone_affs:
+                name = getattr(a, '__name__', repr(a))
+                cat = getattr(a, 'category', None)
+                cat_name = getattr(cat, '__name__', None) if cat else None
+                seen_categories[cat_name] = seen_categories.get(cat_name, 0) + 1
+                if name == "Claude_PhoneMenu":
+                    ours_present = True
+                    out(f"  [OURS] {name}  category={cat_name}  "
+                        f"target={getattr(a, 'target_type', None)}  "
+                        f"appropriateness={getattr(a, 'appropriateness_tags', None)}  "
+                        f"icat={getattr(a, 'interaction_category_tags', None)}")
+
+            out(f"Claude_PhoneMenu PRESENT in live list: {ours_present}")
+            out(f"unique categories ({len(seen_categories)}): {sorted(seen_categories.items(), key=lambda x: -x[1])[:20]}")
+
+            # Dump all entries so we can compare ours to what works
+            out(f"all _phone_affordances entries:")
+            for a in phone_affs:
+                name = getattr(a, '__name__', repr(a))
+                cat = getattr(a, 'category', None)
+                cat_name = getattr(cat, '__name__', None) if cat else None
+                out(f"  - {name}  category={cat_name}")
+        except Exception as e:
+            out(f"failed: {type(e).__name__}: {e}")
 
     @sims4.commands.Command("claude.debug", command_type=sims4.commands.CommandType.Live)
     def cmd_debug(_connection=None):

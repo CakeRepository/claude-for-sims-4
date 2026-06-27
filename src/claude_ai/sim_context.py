@@ -100,6 +100,38 @@ def get_main_sim_info():
     return get_anchor_sim()
 
 
+def _resolve_localized_string(loc_string):
+    """Best-effort: pull a human-readable string out of a Sims 4
+    LocalizedString protobuf. The protobuf has a `tokens` repeated field
+    where each token may have a `raw_text` containing the actual text.
+    Returns None if nothing usable can be extracted."""
+    if loc_string is None:
+        return None
+    if isinstance(loc_string, str):
+        return loc_string
+    # Try the tokens path -- most club / household / sim names are stored
+    # as a single RAW_TEXT token with the literal name.
+    try:
+        tokens = getattr(loc_string, "tokens", None)
+        if tokens:
+            for t in tokens:
+                raw = getattr(t, "raw_text", None)
+                if raw:
+                    return str(raw)
+    except Exception:
+        pass
+    # Last resort: try the LocalizationHelperTuning approach, but only
+    # use the result if it's not still a protobuf-style string.
+    try:
+        from sims4.localization import LocalizationHelperTuning
+        out = LocalizationHelperTuning.get_raw_text(loc_string)
+        if isinstance(out, str) and "raw_text" not in out and not out.startswith("hash:"):
+            return out
+    except Exception:
+        pass
+    return None
+
+
 def _get_trait_name(trait):
     """Extract a readable name from a trait object, trying multiple access patterns."""
     for attr in ("__name__", ):
@@ -682,23 +714,25 @@ def get_sim_clubs(sim_info, limit=4):
                         member_ids.add(mid)
                 if sid is not None and sid not in member_ids:
                     continue
-                # Get the club name — could be a localized string or a raw name
+                # Get the club name. In Sims 4 the club name is a LocalizedString
+                # protobuf with a `tokens` list -- str()ing it produces the raw
+                # protobuf dump ("hash: 12345 tokens { raw_text: 'Lumina' }"),
+                # not the human-readable name. Extract the raw_text field directly.
                 name = None
                 try:
                     cname = getattr(club, "name", None)
                     if cname:
-                        # Try to resolve a localized string
-                        try:
-                            from sims4.localization import LocalizationHelperTuning
-                            name = LocalizationHelperTuning.get_raw_text(str(cname))
-                        except Exception:
-                            name = str(cname)
+                        name = _resolve_localized_string(cname)
                 except Exception:
                     pass
                 if not name:
                     name = type(club).__name__
-                # Clean up tuning-prefix-style names
                 name = str(name).strip()
+                # Strip leftover protobuf debris if anything snuck through
+                if "raw_text" in name or name.startswith("hash:"):
+                    name = ""
+                if not name:
+                    continue
                 if name and name not in clubs:
                     clubs.append(name)
                     if len(clubs) >= limit:

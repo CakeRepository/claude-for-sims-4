@@ -7,8 +7,9 @@ Texts show as phone dialogs with buzz.
 Players can reply with claude.reply <message> to continue the conversation.
 """
 import random
+import threading
 
-from . import api_client, sim_context, config, journal, notifications, moodlets
+from . import api_client, sim_context, config, journal, notifications, moodlets, events
 
 # Conversations keyed by recipient sim_id, so concurrent texts/calls to different
 # household sims don't overwrite each other.
@@ -20,6 +21,88 @@ _last_active_recipient_id = None
 # Set when the player clicks the Reply button on a phone dialog — tells the next
 # claude.reply which conversation to continue.
 _pending_reply_recipient_id = None
+
+
+_REPLY_TEXT_INPUT_NAME = "reply_text"
+
+
+def _show_reply_input_dialog(caller_sim_info, anchor_sim):
+    """
+    Open a text-input dialog so the player can type a reply inline,
+    instead of having to use the cheat console.
+    On submit, calls generate_reply() with the typed text.
+    """
+    try:
+        from sims4.localization import LocalizationHelperTuning
+        from ui.ui_dialog_generic import UiDialogTextInputOkCancel
+        from distributor.shared_messages import IconInfoData
+
+        other_name = ""
+        try:
+            other_name = caller_sim_info.first_name or ""
+        except Exception:
+            pass
+
+        loc_title = LocalizationHelperTuning.get_raw_text(
+            f"Reply to {other_name}" if other_name else "Reply"
+        )
+        loc_text = LocalizationHelperTuning.get_raw_text(
+            "Type what you want to say. Claude will turn it into a message."
+        )
+        loc_send = LocalizationHelperTuning.get_raw_text("Send")
+        loc_cancel = LocalizationHelperTuning.get_raw_text("Cancel")
+
+        # UiDialogTextInputOkCancel needs build_msg to add a text_input field to
+        # the protobuf. We subclass to inject one named field directly instead
+        # of relying on the tuning system's text_inputs TunableTuple.
+        class _ReplyInputDialog(UiDialogTextInputOkCancel):
+            def on_text_input(self, text_input_name='', text_input=''):
+                self.text_input_responses[text_input_name] = text_input
+                return True
+
+            def build_msg(self, text_input_overrides=None, additional_tokens=(), **kwargs):
+                # Let the parent chain build the OK/Cancel buttons etc; it will
+                # also iterate self.text_inputs but that's an empty TunableTuple
+                # for our factory, so nothing gets added there. Then inject our
+                # one named field directly into the protobuf.
+                msg = super().build_msg(additional_tokens=additional_tokens, **kwargs)
+                ti = msg.text_input.add()
+                ti.text_input_name = _REPLY_TEXT_INPUT_NAME
+                # Tall text area so replies have room to breathe.
+                ti.height = 100
+                return msg
+
+        dialog = _ReplyInputDialog.TunableFactory().default(
+            anchor_sim,
+            text=lambda *_a, **_kw: loc_text,
+            title=lambda *_a, **_kw: loc_title,
+            text_ok=lambda *_a, **_kw: loc_send,
+            text_cancel=lambda *_a, **_kw: loc_cancel,
+        )
+
+        def _on_input_response(response_dialog):
+            try:
+                if not response_dialog.accepted:
+                    return
+                reply_text = (response_dialog.text_input_responses or {}).get(
+                    _REPLY_TEXT_INPUT_NAME, ""
+                ).strip()
+                if not reply_text:
+                    return
+                _mark_reply_intent(anchor_sim)
+                generate_reply(reply_text)
+            except Exception:
+                pass
+
+        dialog.add_listener(_on_input_response)
+        icon = IconInfoData(obj_instance=caller_sim_info) if caller_sim_info else None
+        if icon is not None:
+            dialog.show_dialog(icon_override=icon)
+        else:
+            dialog.show_dialog()
+        return True
+    except Exception:
+        return False
 
 
 def _show_phone_dialog(caller_sim_info, title, message, ring=True, recipient_sim_info=None):
@@ -61,11 +144,15 @@ def _show_phone_dialog(caller_sim_info, title, message, ring=True, recipient_sim
 
         def _on_response(response_dialog):
             try:
-                if response_dialog.accepted:
-                    # Lock in which conversation the next claude.reply belongs to.
-                    # Without this, a text/call arriving between Reply click and the
-                    # cheat-console reply would steal the conversation context.
-                    _mark_reply_intent(anchor_sim)
+                if not response_dialog.accepted:
+                    return
+                # Lock in which conversation the next reply belongs to BEFORE
+                # opening the text-input dialog. Without this, a text/call
+                # arriving between Reply click and submit could steal context.
+                _mark_reply_intent(anchor_sim)
+                if not _show_reply_input_dialog(caller_sim_info, anchor_sim):
+                    # Fallback to the cheat-console path if the text dialog
+                    # fails to construct for any reason.
                     import sims4.commands
                     other_name = ""
                     try:
@@ -131,6 +218,12 @@ If past chat contradicts the current label, assume a falling-out happened since 
 CURRENT status overrides past tone. By tier:
 - friends / close / best friends: warm, glad to be in touch
 - friendly acquaintances: polite, normal
+- barely know each other: hesitant, confused, off-balance. You met the player \
+  once or twice and barely remember them. Calling them feels random even to you. \
+  Lead with confusion: "Hey... is this still the right number?", "Sorry, this is \
+  awkward — we met at [event], right?", "Hi, I don't know if you remember me but...". \
+  Keep it short and a little stilted. NEVER warm, NEVER familiar. This tier does \
+  NOT apply if a family role is listed — family always remembers family.
 - have some negative history: cool, brief, no warmth
 - actively dislike each other: cold, dismissive, may snipe; no warmth ANYWHERE
 - enemies: OPENLY HOSTILE — cutting, snarky, dismissive, contemptuous. NEVER \
@@ -182,6 +275,15 @@ Look at the caller's world vs the player's world (both listed in the context).
   chat, or a PLANNED future visit ("when I come visit next month"). Same rule applies to \
   mentions of mutual contacts: only "ran into X" if X lives in the CALLER's world.
 
+# Sims 4 time
+Sims 4 runs much faster than real life. By default ONE in-game week equals \
+ONE SEASON (Spring/Summer/Autumn/Winter), and a sim's adult life is roughly 30 sim days. \
+So when the calendar block says "in 2 weeks", that's TWO IN-GAME SEASONS away, not the \
+real-world feel of a casual fortnight. Pace references accordingly -- "next season", \
+"a while away", "soon" sound more natural than counting weeks. If an event line includes \
+a season label like "(in 2 weeks, Winter)", frame timing by the season rather than by \
+the week count.
+
 # Hard rules
 - The caller and player are on GOOD TERMS unless friendship is negative or the journal \
   shows actual conflict. Never invent past conflict. BANNED phrases (and any variants): \
@@ -206,10 +308,17 @@ Look at the caller's world vs the player's world (both listed in the context).
   come up, talk about them in past tense, as memories, or as ghosts who appear sometimes.
   Don't suggest visiting them, calling them, hanging out with them, etc.
 - PLAY ALONG with the player. If the player references things you don't have data for \
-  (companies, hobbies, events, side businesses, mods, etc.), treat them as canon and \
+  (companies, hobbies, side businesses, mods, etc.), treat them as canon and \
   respond as if you know them. NEVER push back, correct, or say "I think you have me \
   confused" — the player is driving the story. If unsure, ask a curious in-character \
   question instead of disputing the premise.
+- CALENDAR EVENTS are the EXCEPTION to "play along". The upcoming-events block is \
+  ground truth pulled from the in-game calendar. Only reference events listed there, \
+  and do NOT invent details the block doesn't state — who the event is for, who's \
+  hosting, what's planned, where it is. If the block names an honoree ("in memory of \
+  X", "for X and Y") use that exact framing; if it doesn't, stay vague ("the funeral \
+  later", "the wedding next week") and do NOT guess whose it is from other context \
+  like which mutual sim is deceased.
 
 # Output format (STRICT)
 PLAIN TEXT ONLY. No markdown. No `**bold**`, no `*italics*`, no `_emphasis_`, no headings, \
@@ -220,7 +329,17 @@ Format your response as:
 <line 2>
 <line 3, optional>
 
-Just the spoken lines, nothing else."""
+Just the spoken lines, then OPTIONALLY one final line:
+MOOD: <emotion>
+
+ONLY include the MOOD line if this call would *genuinely* change how \
+the recipient feels — big news, an argument, a confession, a flirty \
+escalation, a death in the family, etc. SKIP the MOOD line for routine \
+check-ins, mundane updates, gossip, casual catching-up, or small talk. \
+Most calls should NOT emit a MOOD line. \
+If you do include it, pick from: happy, sad, angry, confident, flirty, \
+playful, energized, focused, inspired, embarrassed, tense, uncomfortable, \
+bored, dazed."""
 
 _TEXT_SYSTEM = """You write text messages from a Sim in The Sims 4 to the player's sim. \
 Stay in character as the sender. Write in {language}.
@@ -268,6 +387,13 @@ If past chat contradicts the current label, assume a falling-out happened since 
 CURRENT status overrides past tone. By tier:
 - friends / close / best friends: warm, glad to be in touch
 - friendly acquaintances: polite, normal
+- barely know each other: hesitant, confused, off-balance. You met the player \
+  once or twice and barely remember them. Texting them feels random even to you. \
+  Lead with confusion: "hey... sorry is this [player first name]?", "wait who is \
+  this lol", "is this the right number? we met at [event] right?", "hi! I don't \
+  know if you remember me but...". Short, stilted, a little awkward. NEVER warm, \
+  NEVER familiar. This tier does NOT apply if a family role is listed — family \
+  always remembers family.
 - have some negative history: cool, brief, no warmth
 - actively dislike each other: cold, dismissive, may snipe; no warmth ANYWHERE
 - enemies: OPENLY HOSTILE — cutting, snarky, dismissive, contemptuous. NEVER \
@@ -315,6 +441,15 @@ Look at the sender's world vs the player's world (both listed in the context).
   distance — texts, video chats, social media, or a PLANNED future visit. Same rule for \
   mentions of mutuals: only "ran into X" if X lives in the SENDER's world.
 
+# Sims 4 time
+Sims 4 runs much faster than real life. By default ONE in-game week equals \
+ONE SEASON (Spring/Summer/Autumn/Winter), and a sim's adult life is roughly 30 sim days. \
+So when the calendar block says "in 2 weeks", that's TWO IN-GAME SEASONS away, not the \
+real-world feel of a casual fortnight. Pace references accordingly -- "next season", \
+"a while away", "soon" sound more natural than counting weeks. If an event line includes \
+a season label like "(in 2 weeks, Winter)", frame timing by the season rather than by \
+the week count.
+
 # Hard rules
 - The sender and player are on GOOD TERMS unless friendship is negative or the journal \
   shows actual conflict. Never invent past conflict. BANNED phrases (and any variants): \
@@ -338,10 +473,17 @@ Look at the sender's world vs the player's world (both listed in the context).
   come up, talk about them in past tense, as memories, or as ghosts who appear sometimes.
   Don't suggest visiting them, calling them, hanging out with them, etc.
 - PLAY ALONG with the player. If the player references things you don't have data for \
-  (companies, hobbies, events, side businesses, mods, etc.), treat them as canon and \
+  (companies, hobbies, side businesses, mods, etc.), treat them as canon and \
   respond as if you know them. NEVER push back, correct, or say "I think you have me \
   confused" — the player is driving the story. If unsure, ask a curious in-character \
   question instead of disputing the premise.
+- CALENDAR EVENTS are the EXCEPTION to "play along". The upcoming-events block is \
+  ground truth pulled from the in-game calendar. Only reference events listed there, \
+  and do NOT invent details the block doesn't state — who the event is for, who's \
+  hosting, what's planned, where it is. If the block names an honoree ("in memory of \
+  X", "for X and Y") use that exact framing; if it doesn't, stay vague ("the funeral \
+  later", "the wedding next week") and do NOT guess whose it is from other context \
+  like which mutual sim is deceased.
 
 # Output format (STRICT)
 PLAIN TEXT ONLY. No markdown. No `**bold**`, no `*italics*`, no `_emphasis_`, no headings, \
@@ -351,7 +493,17 @@ Format your response as:
 <message 1 text>
 <message 2 text, optional, on its own line>
 
-Just the messages, nothing else."""
+Just the messages, then OPTIONALLY one final line:
+MOOD: <emotion>
+
+ONLY include the MOOD line if this text would *genuinely* change how \
+the recipient feels — big news, an argument, a confession, a flirty \
+escalation, etc. SKIP the MOOD line for routine check-ins, mundane \
+updates, gossip, casual catching-up, or small talk. Most texts should \
+NOT emit a MOOD line. \
+If you do include it, pick from: happy, sad, angry, confident, flirty, \
+playful, energized, focused, inspired, embarrassed, tense, uncomfortable, \
+bored, dazed."""
 
 _REPLY_SYSTEM = """You write a Sim's reply to a text from the player's sim in The Sims 4. \
 Stay in character as {other_name} replying to {main_name}. Write in {language}.
@@ -373,6 +525,13 @@ status overrides past tone. Don't keep being warm because old messages were warm
 By tier:
 - "best friends, very close" / "close friends" / "friends, get along well": warm, easy, glad to hear from them
 - "friendly acquaintances": polite, friendly, normal
+- "barely know each other": HESITANT, CONFUSED. You barely remember {main_name} — \
+  you maybe met once or twice. Receiving this text out of the blue is weird. \
+  Lead with something like "wait who is this", "sorry — is this [their name]? \
+  how'd you get my number?", "hi! we've met right? remind me where...", "do I \
+  know you? sorry brain blank". Be a little stilted and ask for a refresher. \
+  NEVER warm, NEVER familiar, NEVER pretend you remember details you don't. \
+  This tier does NOT apply if a family role is listed — family always knows family.
 - "have some negative history": cool, brief, slightly stilted; no warmth
 - "actively dislike each other": cold, dismissive, short replies, may snipe; no warmth ANYWHERE
 - "enemies": OPENLY HOSTILE. Cutting, snarky, dismissive, may insult or mock. \
@@ -387,6 +546,15 @@ By tier:
 no generic responses. If they mention someone or something not in the context, react in \
 character (curious, confused, gossipy) — never refuse or ask for details.
 
+# Sims 4 time
+Sims 4 runs much faster than real life. By default ONE in-game week equals \
+ONE SEASON (Spring/Summer/Autumn/Winter), and a sim's adult life is roughly 30 sim days. \
+So when the calendar block says "in 2 weeks", that's TWO IN-GAME SEASONS away, not the \
+real-world feel of a casual fortnight. Pace references accordingly -- "next season", \
+"a while away", "soon" sound more natural than counting weeks. If an event line includes \
+a season label like "(in 2 weeks, Winter)", frame timing by the season rather than by \
+the week count.
+
 # Hard rules
 - Family relationships are NEVER romantic, regardless of romance score.
 - No profanity or explicit content.
@@ -395,9 +563,15 @@ character (curious, confused, gossipy) — never refuse or ask for details.
   Talk about them in past tense or as memories.
 - Stay in character. Never acknowledge being an AI or claim missing information.
 - PLAY ALONG with the player. If {main_name} references things you don't have data for \
-  (companies, hobbies, events, side businesses, etc.), treat them as canon. \
+  (companies, hobbies, side businesses, etc.), treat them as canon. \
   NEVER push back, correct, or say "I think you have me confused" — the player is driving \
   the story. Roll with it, ask curious in-character questions if needed.
+- CALENDAR EVENTS are the EXCEPTION to "play along". The upcoming-events block is \
+  ground truth from the in-game calendar. Only reference events listed there, and do \
+  NOT invent details the block doesn't state — who the event is for, who's hosting, \
+  what's planned. If the block names an honoree ("in memory of X", "for X and Y"), use \
+  that exact framing; if it doesn't, stay vague ("the funeral later") and do NOT guess \
+  whose it is from other context like which mutual sim is deceased.
 
 # Output format (STRICT)
 PLAIN TEXT ONLY. No markdown, no `**bold**`, no `---` separators, no "Message 1:" labels.
@@ -406,13 +580,147 @@ Format your response as:
 <message 1 text>
 <message 2 text, optional>
 
-Just the messages, nothing else."""
+Just the messages, then OPTIONALLY one final line:
+MOOD: <emotion>
+
+ONLY include the MOOD line if this text would *genuinely* change how \
+the recipient feels — big news, an argument, a confession, a flirty \
+escalation, etc. SKIP the MOOD line for routine check-ins, mundane \
+updates, gossip, casual catching-up, or small talk. Most texts should \
+NOT emit a MOOD line. \
+If you do include it, pick from: happy, sad, angry, confident, flirty, \
+playful, energized, focused, inspired, embarrassed, tense, uncomfortable, \
+bored, dazed."""
 
 
 
 
 # Ages eligible to receive phone calls and texts (teen and above)
 _PHONE_ELIGIBLE_AGES = ("TEEN", "YOUNGADULT", "YOUNG_ADULT", "ADULT", "ELDER")
+
+# Moods strong enough that applying a moodlet from a *reply* (not just
+# an unsolicited incoming) still feels earned. Unsolicited incoming
+# calls/texts apply moodlets for any mood that has a buff available.
+_CHARGED_MOODS = frozenset({"sad", "angry", "flirty", "embarrassed",
+                            "tense", "uncomfortable", "dazed"})
+
+# Cooldown safety net: don't apply more than one moodlet per sim within
+# this window of real-world seconds, even if the LLM emits MOOD on
+# consecutive texts. Keeps stacking under control.
+_MOODLET_COOLDOWN_SECONDS = 30 * 60  # 30 minutes
+_last_moodlet_at = {}  # sim_id -> unix timestamp
+
+
+def _moodlet_on_cooldown(sim_info):
+    import time
+    try:
+        sid = getattr(sim_info, "sim_id", None)
+        if sid is None:
+            return False
+        last = _last_moodlet_at.get(sid)
+        return last is not None and (time.time() - last) < _MOODLET_COOLDOWN_SECONDS
+    except Exception:
+        return False
+
+
+def _mark_moodlet_applied(sim_info):
+    import time
+    try:
+        sid = getattr(sim_info, "sim_id", None)
+        if sid is not None:
+            _last_moodlet_at[sid] = time.time()
+    except Exception:
+        pass
+
+
+def _refresh_milestones_for(contact, recipient_sim):
+    """Run a targeted milestone scan on just the two sims about to appear
+    in the prompt -- catches in-game events (job quit, divorce, etc.) that
+    happened since the last full scan."""
+    try:
+        from . import milestones as _milestones
+        sims = []
+        ci = contact.get("sim_info") if isinstance(contact, dict) else None
+        if ci is not None:
+            sims.append(ci)
+        if recipient_sim is not None:
+            sims.append(recipient_sim)
+        if sims:
+            _milestones.scan_sims(sims)
+    except Exception:
+        pass
+
+
+def _apply_mood_from_text(text, recipient=None, is_incoming=False):
+    """Extract the MOOD: tag and apply the matching moodlet, with three gates:
+      1. LLM only emits MOOD when the message is genuinely impactful
+         (instructed via prompt -- not every text gets one).
+      2. is_incoming=False (reply): only apply if mood is in _CHARGED_MOODS.
+      3. Per-sim cooldown so back-to-back messages don't stack moodlets.
+    """
+    clean_text, mood = moodlets.extract_mood_tag(text)
+    if mood and recipient is not None:
+        try:
+            should_apply = is_incoming or mood in _CHARGED_MOODS
+            if should_apply and not _moodlet_on_cooldown(recipient):
+                ok = moodlets.apply_mood(
+                    recipient, mood,
+                    reason="from incoming text/call" if is_incoming else "from reply",
+                )
+                if ok:
+                    _mark_moodlet_applied(recipient)
+        except Exception:
+            pass
+    return clean_text
+
+
+# Personality traits that slow down or speed up text replies. Used by
+# _calculate_reply_delay to make texting feel realistic for each sim.
+_SLOW_REPLY_TRAITS = ("lazy", "loner", "gloomy", "snob", "unflirty", "perfectionist")
+_FAST_REPLY_TRAITS = ("active", "outgoing", "cheerful", "goofball", "romantic",
+                      "lovestruck", "hot_headed", "hotheaded")
+
+
+def _calculate_reply_delay(contact):
+    """How long (in seconds) the sim should 'think' before replying to a
+    player-initiated text. Adjusts the configured base range by friendship
+    closeness and personality traits. Returns 0 if delays are disabled."""
+    try:
+        if not config.get_reply_delay_enabled():
+            return 0
+    except Exception:
+        return 0
+
+    base_min = max(1, config.get_reply_delay_min_seconds())
+    base_max = max(base_min, config.get_reply_delay_max_seconds())
+    delay = random.randint(base_min, base_max)
+
+    # Closer relationships reply faster; hostile ones drag.
+    friendship = contact.get("friendship") or 0
+    if friendship >= 75:
+        delay = int(delay * 0.5)
+    elif friendship >= 45:
+        delay = int(delay * 0.7)
+    elif friendship < -70:
+        delay = int(delay * 2.0)
+    elif friendship < 0:
+        delay = int(delay * 1.5)
+
+    # Trait modifiers — pulled from the contact's sim_info if we have it.
+    sim_info = contact.get("sim_info")
+    if sim_info is not None:
+        try:
+            trait_names = [t.lower().replace(" ", "").replace("-", "_")
+                           for t in sim_context.get_sim_traits(sim_info, limit=10)]
+            if any(t in trait_names for t in _SLOW_REPLY_TRAITS):
+                delay = int(delay * 1.4)
+            if any(t in trait_names for t in _FAST_REPLY_TRAITS):
+                delay = int(delay * 0.7)
+        except Exception:
+            pass
+
+    # Floor at 5s so even best-friend texts feel like real typing, not psychic.
+    return max(5, delay)
 
 
 # Non-human species names to reject. We check by suffix so this works with
@@ -515,6 +823,42 @@ def _pick_recipient_sim():
         return None
 
 
+def _eligible_recipients():
+    """Return the full list of teen+ human sims in the active household,
+    shuffled so iteration order is unbiased. Used by
+    _pick_recipient_and_contact when one recipient has no eligible contacts
+    and we want to try a different household member."""
+    try:
+        import services, random as _random
+        hh = services.active_household()
+        if not hh:
+            main = sim_context.get_main_sim_info()
+            return [main] if (main and _is_phone_eligible(main)) else []
+        eligible = [si for si in hh.sim_info_gen() if _is_phone_eligible(si)]
+        _random.shuffle(eligible)
+        return eligible
+    except Exception:
+        return []
+
+
+def _pick_recipient_and_contact():
+    """Find a (recipient, contact) pair where the contact passes the strict
+    filter. Tries each eligible recipient in random order; only fails if
+    nobody in the household has any plausible caller. This lets us hold
+    a higher bar on plausibility (no cross-gen acquaintances surfacing as
+    text senders) without the mod going silent when one recipient happens
+    to have only awkward contacts."""
+    recipients = _eligible_recipients()
+    if not recipients:
+        _log_household_inspection()
+        return None, None
+    for recipient in recipients:
+        contact = _pick_random_relationship_sim(recipient=recipient)
+        if contact:
+            return recipient, contact
+    return None, None
+
+
 def _get_sims_on_active_lot():
     """Return a set of sim_ids currently on the active lot."""
     sim_ids = set()
@@ -594,25 +938,46 @@ def find_contact_by_name(full_name):
             if contact["name"].lower() == name_lower:
                 return contact
 
-    # Fallback: search the sim manager directly and build a contact dict
+    # Fallback: search the sim manager directly and build a contact dict.
+    # The network search above filters by min_friendship=25, so low-friendship
+    # sims (e.g. -9 acquaintances) never appear there. We still want to surface
+    # those — and crucially we still need their friendship/romance scores so
+    # the "barely know each other" tier applies. Read them directly from the
+    # main sim's relationship tracker before returning.
     try:
         import services
         parts = full_name.strip().split(None, 1)
         first = parts[0].lower()
         last = parts[1].lower() if len(parts) > 1 else ""
 
-        for si in services.sim_info_manager().values():
+        sm = services.sim_info_manager()
+        for si in sm.values():
             if si.first_name.lower() != first:
                 continue
             if last and si.last_name.lower() != last:
                 continue
+
+            friendship = None
+            romance = None
+            status = ""
+            if main_si is not None:
+                try:
+                    rt = main_si.relationship_tracker
+                    entry = sim_context._read_relationship_for_target(rt, si.sim_id, sm)
+                    if entry:
+                        friendship = entry.get("friendship")
+                        romance = entry.get("romance")
+                        status = entry.get("status", "") or ""
+                except Exception:
+                    pass
+
             return {
                 "sim_info": si,
                 "sim_id": si.sim_id,
                 "name": f"{si.first_name} {si.last_name}".strip(),
-                "status": "",
-                "friendship": None,
-                "romance": None,
+                "status": status,
+                "friendship": friendship,
+                "romance": romance,
                 "in_household": False,
             }
     except Exception:
@@ -627,6 +992,9 @@ def _is_age_appropriate_contact(contact, recipient):
     don't randomly chat-text their kid's teen friends. Such pairs exist in
     the relationship tracker (they've met) but they're not natural texters
     unless they're family OR have a genuinely close friendship.
+
+    (The picker has a fallback tier that relaxes this filter when it would
+    otherwise leave the recipient with nothing.)
     """
     contact_si = contact.get("sim_info")
     if not contact_si or not recipient:
@@ -650,9 +1018,54 @@ def _is_age_appropriate_contact(contact, recipient):
     return False
 
 
+def _log_picker(message):
+    """Diagnostic logger for the contact picker. Goes to the main log file."""
+    try:
+        import os, datetime
+        path = os.path.join(os.path.expanduser("~"), "Documents", "ClaudeAI_Log.txt")
+        with open(path, "a", encoding="utf-8") as f:
+            ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            f.write(f"[{ts}] [picker] {message}\n")
+    except Exception:
+        pass
+
+
+def _journal_obsolescence_note(contact):
+    """If the current friendship label disagrees with the warmth of past
+    journal entries, return a single-line note we append under the
+    journal block. The model handles tone fine when the prompt isn't
+    contradicting itself -- this note tells it that warm history
+    predates the current state and should be treated as obsolete.
+
+    Returns "" when the journal and current label are consistent
+    (and so no annotation is needed)."""
+    try:
+        score = contact.get("friendship")
+        if score is None:
+            return ""
+    except Exception:
+        return ""
+    if score < -70:
+        return ("[NOTE: They are now ENEMIES. Any warmth or friendliness in the "
+                "entries above is OBSOLETE -- treat as predating the falling-out.]")
+    if score < -40:
+        return ("[NOTE: They now actively DISLIKE each other. Warmth in entries "
+                "above is OBSOLETE -- treat as predating the relationship souring.]")
+    if score < -20:
+        return ("[NOTE: They now have NEGATIVE history. Warm entries above are "
+                "from before things cooled and should not shape the current tone.]")
+    return ""
+
+
 def _pick_random_relationship_sim(recipient=None):
     """Pick a random non-household sim from the recipient's relationship network.
-    If no recipient passed, falls back to protagonist."""
+    Hard filters: pets, ghosts (when disabled in config), sims currently on
+    the active lot (no "calling from the next room"), and cross-generational
+    acquaintances who aren't family or close friends. If nothing passes, we
+    return None -- the caller (_pick_recipient_and_contact) will try a
+    different household member rather than relax these rules."""
+    recipient_name = recipient.first_name if recipient else "(no recipient)"
+
     base_si = recipient or sim_context.get_main_sim_info()
     if base_si:
         _household_members, relationships = sim_context.get_main_sim_network(base_si)
@@ -660,28 +1073,31 @@ def _pick_random_relationship_sim(recipient=None):
     else:
         active = sim_context.get_active_sim()
         if not active or not active.sim_info:
+            _log_picker(f"No base sim or active sim found for {recipient_name}.")
             return None
         rels = sim_context.get_sim_relationships(active.sim_info)
         contacts = [r for r in rels if not r.get("in_household")]
 
-    # Filter out pets -- dogs, cats, horses, foxes don't text or call.
-    contacts = [c for c in contacts if _is_human_sim(c.get("sim_info"))]
+    initial_count = len(contacts)
 
-    # Filter out ghosts unless config allows them
-    allow_ghosts = config.get_config().getboolean("claude_ai", "phone_allow_ghosts", fallback=True)
+    # Hard filters: pets, and ghosts when disabled in config.
+    contacts = [c for c in contacts if _is_human_sim(c.get("sim_info"))]
+    allow_ghosts = config.get_phone_allow_ghosts()
     if not allow_ghosts:
         contacts = [c for c in contacts if not _is_ghost(c.get("sim_info"))]
 
-    # Filter out sims currently on the same lot
+    # Strict filter: off-lot AND age-appropriate. Neither is relaxed --
+    # if the recipient's only options are on-lot or cross-gen acquaintances,
+    # _pick_recipient_and_contact tries a different household member instead.
     on_lot = _get_sims_on_active_lot()
-    if on_lot:
-        contacts = [c for c in contacts if c.get("sim_id") not in on_lot]
+    contacts_off_lot = [c for c in contacts if not on_lot or c.get("sim_id") not in on_lot]
 
-    # Filter out implausible cross-generational acquaintance pairings
     if recipient is not None:
-        contacts = [c for c in contacts if _is_age_appropriate_contact(c, recipient)]
+        chosen_pool = [c for c in contacts_off_lot if _is_age_appropriate_contact(c, recipient)]
+    else:
+        chosen_pool = contacts_off_lot
 
-    if not contacts and base_si:
+    if not chosen_pool and base_si:
         # Fallback to any human NPC sim in the world
         try:
             import services
@@ -710,19 +1126,23 @@ def _pick_random_relationship_sim(recipient=None):
                 if recipient is not None and not _is_age_appropriate_contact(temp_contact, recipient):
                     continue
 
-                contacts.append(temp_contact)
+                chosen_pool.append(temp_contact)
         except Exception:
             pass
 
-    if not contacts:
+    if not chosen_pool:
+        _log_picker(
+            f"{recipient_name}: 0 strict contacts (initial {initial_count}). "
+            f"Caller should try a different recipient."
+        )
         return None
 
     weights = []
-    for contact in contacts:
+    for contact in chosen_pool:
         score = abs(contact.get("friendship") or 0) + abs(contact.get("romance") or 0)
         weights.append(max(score, 10))
 
-    return random.choices(contacts, weights=weights, k=1)[0]
+    return random.choices(chosen_pool, weights=weights, k=1)[0]
 
 
 # Bits that signal a relationship is platonic (no longer romantic).
@@ -742,6 +1162,55 @@ def _has_platonic_bit(bits):
         except Exception:
             pass
     return False
+
+
+# Detection priority: highest commitment first. The first match wins so
+# we don't downgrade a Married sim to "in a relationship with" if both
+# bits happen to coexist.
+_ROMANTIC_STATUS_PATTERNS = (
+    # (canonical_status, [bit substring matches], [exclusion substrings])
+    ("married to",            ("spouse", "married"),          ("unmarried", "divorced", "ex_", "former")),
+    ("engaged to",            ("engaged",),                    ("dis", "broken")),
+    ("in a relationship with",("goingsteady", "boyfriend",
+                               "girlfriend", "significantother"), ("ex_", "former", "broke")),
+)
+
+
+def _get_romantic_partner_info(sim_info):
+    """Return (partner_sim_info, status_string) if this sim is in a committed
+    romantic relationship (married / engaged / going steady).
+    Returns (None, None) otherwise."""
+    if sim_info is None:
+        return None, None
+    try:
+        rt = sim_info.relationship_tracker
+        if rt is None:
+            return None, None
+    except Exception:
+        return None, None
+
+    try:
+        import services
+        sm = services.sim_info_manager()
+    except Exception:
+        sm = None
+
+    for tid in rt.target_sim_gen():
+        try:
+            bits = list(rt.get_all_bits(tid))
+            if not bits or _has_platonic_bit(bits):
+                continue
+            bit_names = [sim_context._get_trait_name(b).lower().replace("_", "") for b in bits]
+            for status, include, exclude in _ROMANTIC_STATUS_PATTERNS:
+                if not any(any(inc in bn for inc in include) for bn in bit_names):
+                    continue
+                if any(any(exc in bn for exc in exclude) for bn in bit_names):
+                    continue
+                partner_si = sm.get(tid) if sm else None
+                return (partner_si, status)
+        except Exception:
+            continue
+    return None, None
 
 
 def _describe_recipient(recipient_sim, contact=None):
@@ -773,6 +1242,16 @@ def _describe_recipient(recipient_sim, contact=None):
     clubs = sim_context.get_sim_clubs(recipient_sim)
     if clubs:
         parts.append(f"{recipient_sim.first_name}'s clubs: {', '.join(clubs)}")
+
+    # Recipient's romantic / marital status -- so a caller doesn't write
+    # the player's spouse a flirty "we should meet up" type message.
+    try:
+        partner_si, rstatus = _get_romantic_partner_info(recipient_sim)
+        if partner_si and rstatus:
+            pname = f"{partner_si.first_name} {partner_si.last_name}".strip()
+            parts.append(f"{recipient_sim.first_name} is {rstatus} {pname}")
+    except Exception:
+        pass
 
     # Household members the recipient lives with — so Claude knows about kids/spouses/etc
     # who might come up in conversation but aren't in the contact's relationship tracker.
@@ -814,6 +1293,31 @@ def _describe_recipient(recipient_sim, contact=None):
     if household_lines:
         parts.append(f"\n{recipient_sim.first_name}'s household:")
         parts.extend(household_lines)
+
+    # Surface any recent milestones for the recipient so the caller can
+    # plausibly reference them ("hey congrats on the promotion!").
+    # Pass the caller's sim_id as contact_id so each milestone is only
+    # surfaced to that contact ONCE -- prevents the same sim asking about
+    # the same job-quit / promotion across multiple calls.
+    try:
+        from . import milestones as _milestones
+        contact_sim_id = None
+        if contact is not None:
+            try:
+                contact_sim_id = contact.get("sim_id") if isinstance(contact, dict) else None
+            except Exception:
+                pass
+        mblock = _milestones.format_for_prompt(recipient_sim, contact_id=contact_sim_id)
+        if mblock:
+            # Re-label so the LLM understands these are events in the
+            # recipient's life, not the caller's.
+            mblock = mblock.replace(
+                "Recent in their life:",
+                f"Recent in {recipient_sim.first_name}'s life (you may know about these):",
+            )
+            parts.append("\n" + mblock)
+    except Exception:
+        pass
 
     return "\n".join(parts)
 
@@ -952,6 +1456,45 @@ def _infer_kin_via_player(contact_role, mutual_role, mutual_si):
         gender = ""
     male_lbl, female_lbl = gendered
     return male_lbl if gender == "MALE" else female_lbl
+
+
+def _format_mutual_block(mutuals, casual=True):
+    """Build the mutual contacts block for a prompt. Two flavors: the
+    longer 'gossip welcome' version used for incoming call/text prompts,
+    and a tighter version for reply-style prompts. Both add the family-
+    reference rule so the model says 'your dad' instead of 'Apollo' when
+    a mutual is the recipient's parent."""
+    if not mutuals:
+        return ""
+    header = (
+        "\n\nPeople BOTH of you know "
+        "(these are the ONLY mutual sims you can reference by name):\n"
+        if casual else
+        "\n\nPeople BOTH of you know (the ONLY mutual sims you can name):\n"
+    )
+    body = header + "\n".join(f"  - {m}" for m in mutuals)
+    if casual:
+        body += (
+            "\nFeel free to gossip about, mention, or bring up any of these sims naturally. "
+            "DO NOT invent any other sim names -- if you need to reference someone not on "
+            "this list, use a generic reference like 'a coworker', 'my neighbor', "
+            "'this friend of mine' instead."
+        )
+    else:
+        body += (
+            "\nDO NOT invent other sim names -- use generic references like 'a coworker' "
+            "if needed."
+        )
+    body += (
+        "\nWhen mentioning a mutual who is family of the message recipient "
+        "(listed as 'Francesca's Father', 'Daniel's Sister', etc.), refer to "
+        "them by the family role from the recipient's perspective -- "
+        "\"your dad\", \"your mom\", \"your sister\", \"your brother\", \"your son\", "
+        "\"your daughter\" -- NOT by their first name. This is how real people talk "
+        "to family about other family. First-name references are fine for non-family "
+        "mutuals."
+    )
+    return body
 
 
 def _get_mutual_contacts(contact, recipient=None):
@@ -1538,6 +2081,60 @@ def _get_family_relationship(other_si, contact, recipient=None):
     except Exception:
         pass
 
+    # Last-resort: check bits from the OTHER side of the relationship.
+    # Sims 4 normally writes family bits symmetrically, but saves can drift --
+    # e.g. Francesca's tracker still says "Apollo is my Father" while Apollo's
+    # tracker has dropped the matching "Francesca is my Daughter" bit. By
+    # reading other_si's view of main_si and inverting it, we recover the
+    # relationship without needing to mutate the save.
+    try:
+        other_rt = other_si.relationship_tracker
+        other_bits = other_rt.get_all_bits(main_si.sim_id)
+        if other_bits:
+            other_bit_names = []
+            for bit in other_bits:
+                try:
+                    other_bit_names.append(sim_context._get_trait_name(bit).lower())
+                except Exception:
+                    pass
+            compact = [bn.replace("_", "").replace("-", "") for bn in other_bit_names]
+
+            def other_has_compact(substr):
+                return any(substr in cb for cb in compact)
+
+            def other_any_bit(*keywords):
+                return any(any(kw in bn for kw in keywords) for bn in other_bit_names)
+
+            # If the OTHER sim's tracker says main_si is their parent,
+            # then main_si is the parent => other_si is main_si's child.
+            if other_has_compact("targetisparentof") or other_has_compact("isparentof"):
+                if other_can_be_child_of_main:
+                    return male_or("Son", "Daughter")
+            # If the other sim's tracker says main_si is their child,
+            # then main_si is the child => other_si is the parent.
+            if other_has_compact("targetischildof") or other_has_compact("ischildof"):
+                if other_can_be_parent_of_main:
+                    return male_or("Father", "Mother")
+            # Generic parent bit on the other side, direction inferred by age.
+            if (other_any_bit("parent") and not other_any_bit("grandparent")
+                    and not other_has_compact("inlaw")):
+                if other_is_younger:
+                    return male_or("Son", "Daughter")
+                if other_is_older:
+                    return male_or("Father", "Mother")
+            # Generic child / offspring bit on the other side.
+            if ((other_any_bit("offspring")
+                 or any(("child" in bn and "grandchild" not in bn) for bn in other_bit_names))
+                    and not other_has_compact("inlaw")):
+                if other_is_younger:
+                    return male_or("Son", "Daughter")
+                if other_is_older:
+                    return male_or("Father", "Mother")
+            if other_any_bit("sibling", "brother", "sister"):
+                return male_or("Brother", "Sister")
+    except Exception:
+        pass
+
     return None
 
 
@@ -1630,6 +2227,28 @@ def _describe_relationship(contact, recipient=None):
     if contact.get("in_household") is True:
         parts.append("Lives in the same household as the player")
 
+    # Romantic / marital status -- crucial context so the LLM doesn't
+    # write a married sim hitting dating apps, etc.
+    if si:
+        try:
+            partner_si, rstatus = _get_romantic_partner_info(si)
+            if partner_si and rstatus:
+                pname = f"{partner_si.first_name} {partner_si.last_name}".strip()
+                parts.append(f"{name} is {rstatus} {pname}")
+        except Exception:
+            pass
+
+    # Recent life events the sim might want to talk about (or that the
+    # player might bring up). Pulled from milestones tracker.
+    if si:
+        try:
+            from . import milestones as _milestones
+            mblock = _milestones.format_for_prompt(si)
+            if mblock:
+                parts.append(mblock)
+        except Exception:
+            pass
+
     return "\n".join(parts)
 
 
@@ -1638,6 +2257,10 @@ def _friendship_label(score):
     Convert a Sims 4 friendship score to a closeness label.
     Positive scores only indicate degrees of closeness — never tension.
     Tension only appears at NEGATIVE scores.
+
+    Scores between -19 and +9 collapse into "barely know each other" — they
+    represent sims who've met once or twice but never developed a real
+    relationship. Triggers "wait, who is this?" reactions in the prompts.
     """
     if score is None:
         return None
@@ -1647,8 +2270,10 @@ def _friendship_label(score):
         return "close friends"
     if score >= 20:
         return "friends, get along well"
-    if score >= 0:
+    if score >= 10:
         return "friendly acquaintances"
+    if score >= -19:
+        return "barely know each other -- might not remember the player clearly"
     if score >= -40:
         return "have some negative history"
     if score >= -70:
@@ -1758,7 +2383,7 @@ def get_active_conversation():
 
 def generate_call(callback=None, output=None):
     """Generate an incoming phone call to a random teen+ household member."""
-    recipient = _pick_recipient_sim()
+    recipient, contact = _pick_recipient_and_contact()
     if not recipient:
         msg = "No eligible household members (teen or older) found to receive a call."
         if callback:
@@ -1766,10 +2391,8 @@ def generate_call(callback=None, output=None):
         elif output:
             notifications.show_error(msg, output=output)
         return
-
-    contact = _pick_random_relationship_sim(recipient=recipient)
     if not contact:
-        msg = f"{recipient.first_name} doesn't have any relationships to call from."
+        msg = "No household member has any plausible contacts to call them right now."
         if callback:
             callback(None, msg)
         elif output:
@@ -1778,27 +2401,31 @@ def generate_call(callback=None, output=None):
 
     recipient_name = recipient.first_name
 
+    _refresh_milestones_for(contact, recipient)
+
     language = config.get_language()
     system = _CALL_SYSTEM.format(language=language)
     rel_desc = _describe_relationship(contact, recipient=recipient)
 
-    sim_history = journal.format_sim_history_for_prompt(contact["name"], recipient_name=recipient_name)
+    sim_history = journal.format_sim_history_for_prompt(
+        contact["name"],
+        recipient_name=recipient_name,
+        trailing_note=_journal_obsolescence_note(contact),
+    )
     history_block = f"\n\n{sim_history}" if sim_history else ""
 
     mutuals = _get_mutual_contacts(contact, recipient=recipient)
-    mutual_block = ""
-    if mutuals:
-        mutual_block = "\n\nPeople BOTH of you know (these are the ONLY mutual sims you can reference by name):\n" + "\n".join(f"  - {m}" for m in mutuals)
-        mutual_block += "\nFeel free to gossip about, mention, or bring up any of these sims naturally. \
-DO NOT invent any other sim names — if you need to reference someone not on this list, \
-use a generic reference like 'a coworker', 'my neighbor', 'this friend of mine' instead."
+    mutual_block = _format_mutual_block(mutuals, casual=True)
 
 
     recipient_block = _describe_recipient(recipient, contact=contact)
 
+    events_text = events.format_shared_events_for_prompt(recipient, contact.get("sim_info"))
+    events_block = f"\n\n{events_text}" if events_text else ""
+
     prompt = (
         f"Caller info:\n{rel_desc}{history_block}{mutual_block}\n\n"
-        f"{recipient_block}\n\n"
+        f"{recipient_block}{events_block}\n\n"
         f"They are calling {recipient_name}{_location_context(recipient, contact)}.{_season_context()}\n\n"
         f"Write what {contact['name']} says during this phone call."
     )
@@ -1806,7 +2433,7 @@ use a generic reference like 'a coworker', 'my neighbor', 'this friend of mine' 
     def _on_result(text, error):
         title = f"Call from {contact['name']}"
         if text:
-            text = moodlets.clean_response(text)
+            text = _apply_mood_from_text(text, recipient=recipient, is_incoming=True)
             _start_conversation(contact, text, recipient_sim=recipient)
             journal.add_entry("call", f"Call from {contact['name']} (to {recipient_name}):\n{text}", sim_name=contact["name"], recipient_name=recipient_name)
             caller_si = contact.get("sim_info")
@@ -1830,7 +2457,7 @@ use a generic reference like 'a coworker', 'my neighbor', 'this friend of mine' 
 
 def generate_text(callback=None, output=None):
     """Generate an incoming text to a random teen+ household member."""
-    recipient = _pick_recipient_sim()
+    recipient, contact = _pick_recipient_and_contact()
     if not recipient:
         msg = "No eligible household members (teen or older) found to receive a text."
         if callback:
@@ -1838,10 +2465,8 @@ def generate_text(callback=None, output=None):
         elif output:
             notifications.show_error(msg, output=output)
         return
-
-    contact = _pick_random_relationship_sim(recipient=recipient)
     if not contact:
-        msg = f"{recipient.first_name} doesn't have any relationships to text from."
+        msg = "No household member has any plausible contacts to text them right now."
         if callback:
             callback(None, msg)
         elif output:
@@ -1850,27 +2475,31 @@ def generate_text(callback=None, output=None):
 
     recipient_name = recipient.first_name
 
+    _refresh_milestones_for(contact, recipient)
+
     language = config.get_language()
     system = _TEXT_SYSTEM.format(language=language)
     rel_desc = _describe_relationship(contact, recipient=recipient)
 
-    sim_history = journal.format_sim_history_for_prompt(contact["name"], recipient_name=recipient_name)
+    sim_history = journal.format_sim_history_for_prompt(
+        contact["name"],
+        recipient_name=recipient_name,
+        trailing_note=_journal_obsolescence_note(contact),
+    )
     history_block = f"\n\n{sim_history}" if sim_history else ""
 
     mutuals = _get_mutual_contacts(contact, recipient=recipient)
-    mutual_block = ""
-    if mutuals:
-        mutual_block = "\n\nPeople BOTH of you know (these are the ONLY mutual sims you can reference by name):\n" + "\n".join(f"  - {m}" for m in mutuals)
-        mutual_block += "\nFeel free to gossip about, mention, or bring up any of these sims naturally. \
-DO NOT invent any other sim names — if you need to reference someone not on this list, \
-use a generic reference like 'a coworker', 'my neighbor', 'this friend of mine' instead."
+    mutual_block = _format_mutual_block(mutuals, casual=True)
 
 
     recipient_block = _describe_recipient(recipient, contact=contact)
 
+    events_text = events.format_shared_events_for_prompt(recipient, contact.get("sim_info"))
+    events_block = f"\n\n{events_text}" if events_text else ""
+
     prompt = (
         f"Sender info:\n{rel_desc}{history_block}{mutual_block}\n\n"
-        f"{recipient_block}\n\n"
+        f"{recipient_block}{events_block}\n\n"
         f"They are texting {recipient_name}{_location_context(recipient, contact)}.{_season_context()}\n\n"
         f"Write 1-2 short text messages from {contact['name']}."
     )
@@ -1878,7 +2507,7 @@ use a generic reference like 'a coworker', 'my neighbor', 'this friend of mine' 
     def _on_result(text, error):
         title = f"Text from {contact['name']}"
         if text:
-            text = moodlets.clean_response(text)
+            text = _apply_mood_from_text(text, recipient=recipient, is_incoming=True)
             _start_conversation(contact, text, recipient_sim=recipient)
             journal.add_entry("text", f"Text from {contact['name']} (to {recipient_name}):\n{text}", sim_name=contact["name"], recipient_name=recipient_name)
             sender_si = contact.get("sim_info")
@@ -1929,6 +2558,8 @@ def generate_reply(player_message, callback=None, output=None):
         main_name = main_si.first_name if main_si else "your Sim"
     other_name = contact["name"]
 
+    _refresh_milestones_for(contact, recipient)
+
     language = config.get_language()
     system = _REPLY_SYSTEM.format(
         language=language,
@@ -1937,31 +2568,49 @@ def generate_reply(player_message, callback=None, output=None):
     )
     rel_desc = _describe_relationship(contact, recipient=recipient)
     convo_text = _format_conversation_history(history, main_name, other_name)
-    sim_history = journal.format_sim_history_for_prompt(other_name, recipient_name=main_name)
+    sim_history = journal.format_sim_history_for_prompt(
+        other_name,
+        recipient_name=main_name,
+        trailing_note=_journal_obsolescence_note(contact),
+    )
     history_block = f"\n\n{sim_history}" if sim_history else ""
 
     mutuals = _get_mutual_contacts(contact, recipient=recipient)
-    mutual_block = ""
-    if mutuals:
-        mutual_block = "\n\nPeople BOTH of you know (the ONLY mutual sims you can name):\n" + "\n".join(f"  - {m}" for m in mutuals)
-        mutual_block += "\nDO NOT invent other sim names — use generic references like 'a coworker' if needed."
+    mutual_block = _format_mutual_block(mutuals, casual=False)
 
+    events_text = events.format_shared_events_for_prompt(recipient, contact.get("sim_info"))
+    events_block = f"\n\n{events_text}" if events_text else ""
 
     prompt = (
-        f"Relationship info:\n{rel_desc}{history_block}{mutual_block}\n\n"
+        f"Relationship info:\n{rel_desc}{history_block}{mutual_block}{events_block}\n\n"
         f"Conversation so far:\n{convo_text}\n\n"
         f"Write {other_name}'s reply (1-3 short text messages)."
     )
 
     def _on_result(text, error):
-        if text:
-            text = moodlets.clean_response(text)
-            history.append({"role": "them", "text": text})
+        if error:
+            # Errors fire immediately; no point delaying a failure popup.
+            if history and history[-1]["role"] == "you":
+                history.pop()
+            notifications.show_error(error, output=output)
+            if callback:
+                callback(text, error)
+            return
+        if not text:
+            if callback:
+                callback(text, error)
+            return
+
+        text_clean = _apply_mood_from_text(text, recipient=recipient, is_incoming=False)
+        delay = _calculate_reply_delay(contact)
+
+        def _show_reply():
+            history.append({"role": "them", "text": text_clean})
             journal.add_entry(
                 "text",
                 f"Conversation with {other_name}:\n"
                 f"{main_name}: {player_message}\n"
-                f"{other_name}: {text}",
+                f"{other_name}: {text_clean}",
                 sim_name=other_name,
                 recipient_name=main_name,
             )
@@ -1969,16 +2618,16 @@ def generate_reply(player_message, callback=None, output=None):
             sender_si = contact.get("sim_info")
             shown = False
             if sender_si:
-                shown = _show_phone_dialog(sender_si, title, text, ring=False, recipient_sim_info=recipient)
+                shown = _show_phone_dialog(sender_si, title, text_clean, ring=False, recipient_sim_info=recipient)
             if not shown:
-                notifications.show(title, text, output=output)
-        elif error:
-            # Remove player message from history since the reply failed
-            if history and history[-1]["role"] == "you":
-                history.pop()
-            notifications.show_error(error, output=output)
-        if callback:
-            callback(text, error)
+                notifications.show(title, text_clean, output=output)
+            if callback:
+                callback(text_clean, None)
+
+        if delay > 0:
+            threading.Timer(delay, _show_reply).start()
+        else:
+            _show_reply()
 
     return api_client.call_claude_async(
         [{"role": "user", "content": prompt}],
@@ -2002,6 +2651,8 @@ def send_text(contact, player_message, callback=None, output=None):
     rid = main_si.sim_id if (main_si and getattr(main_si, "sim_id", None)) else 0
     _conversations[rid]["history"] = [{"role": "you", "text": player_message}]
 
+    _refresh_milestones_for(contact, main_si)
+
     language = config.get_language()
     system = _REPLY_SYSTEM.format(
         language=language,
@@ -2009,17 +2660,20 @@ def send_text(contact, player_message, callback=None, output=None):
         main_name=main_name,
     )
     rel_desc = _describe_relationship(contact)
-    sim_history = journal.format_sim_history_for_prompt(other_name, recipient_name=main_name)
+    sim_history = journal.format_sim_history_for_prompt(
+        other_name,
+        recipient_name=main_name,
+        trailing_note=_journal_obsolescence_note(contact),
+    )
     history_block = f"\n\n{sim_history}" if sim_history else ""
     mutuals = _get_mutual_contacts(contact)
-    mutual_block = ""
-    if mutuals:
-        mutual_block = "\n\nPeople BOTH of you know (the ONLY mutual sims you can name):\n" + "\n".join(f"  - {m}" for m in mutuals)
-        mutual_block += "\nDO NOT invent other sim names — use generic references like 'a coworker' if needed."
+    mutual_block = _format_mutual_block(mutuals, casual=False)
 
+    events_text = events.format_shared_events_for_prompt(main_si, contact.get("sim_info"))
+    events_block = f"\n\n{events_text}" if events_text else ""
 
     prompt = (
-        f"Relationship info:\n{rel_desc}{history_block}{mutual_block}\n\n"
+        f"Relationship info:\n{rel_desc}{history_block}{mutual_block}{events_block}\n\n"
         f"{main_name} just texted {other_name}: \"{player_message}\"\n\n"
         f"Write {other_name}'s reply (1-3 short text messages). "
         f"If {main_name} mentions people or events you don't have details about, "
@@ -2027,15 +2681,27 @@ def send_text(contact, player_message, callback=None, output=None):
     )
 
     def _on_send_text_result(text, error):
-        if text:
-            text = moodlets.clean_response(text)
+        if error:
+            notifications.show_error(error, output=output)
+            if callback:
+                callback(text, error)
+            return
+        if not text:
+            if callback:
+                callback(text, error)
+            return
+
+        text_clean = _apply_mood_from_text(text, recipient=main_si, is_incoming=False)
+        delay = _calculate_reply_delay(contact)
+
+        def _show_reply():
             if rid in _conversations:
-                _conversations[rid]["history"].append({"role": "them", "text": text})
+                _conversations[rid]["history"].append({"role": "them", "text": text_clean})
             journal.add_entry(
                 "text",
                 f"Text conversation with {other_name}:\n"
                 f"{main_name}: {player_message}\n"
-                f"{other_name}: {text}",
+                f"{other_name}: {text_clean}",
                 sim_name=other_name,
                 recipient_name=main_name,
             )
@@ -2043,13 +2709,16 @@ def send_text(contact, player_message, callback=None, output=None):
             sender_si = contact.get("sim_info")
             shown = False
             if sender_si:
-                shown = _show_phone_dialog(sender_si, title, text, ring=False)
+                shown = _show_phone_dialog(sender_si, title, text_clean, ring=False)
             if not shown:
-                notifications.show(title, text, output=output)
-        elif error:
-            notifications.show_error(error, output=output)
-        if callback:
-            callback(text, error)
+                notifications.show(title, text_clean, output=output)
+            if callback:
+                callback(text_clean, None)
+
+        if delay > 0:
+            threading.Timer(delay, _show_reply).start()
+        else:
+            _show_reply()
 
     return api_client.call_claude_async(
         [{"role": "user", "content": prompt}],
@@ -2072,20 +2741,25 @@ def send_call(contact, player_topic, callback=None, output=None):
     rid = main_si.sim_id if (main_si and getattr(main_si, "sim_id", None)) else 0
     _conversations[rid]["history"] = [{"role": "you", "text": player_topic}]
 
+    _refresh_milestones_for(contact, main_si)
+
     language = config.get_language()
     system = _CALL_SYSTEM.format(language=language)
     rel_desc = _describe_relationship(contact)
-    sim_history = journal.format_sim_history_for_prompt(other_name, recipient_name=main_name)
+    sim_history = journal.format_sim_history_for_prompt(
+        other_name,
+        recipient_name=main_name,
+        trailing_note=_journal_obsolescence_note(contact),
+    )
     history_block = f"\n\n{sim_history}" if sim_history else ""
     mutuals = _get_mutual_contacts(contact)
-    mutual_block = ""
-    if mutuals:
-        mutual_block = "\n\nPeople BOTH of you know (the ONLY mutual sims you can name):\n" + "\n".join(f"  - {m}" for m in mutuals)
-        mutual_block += "\nDO NOT invent other sim names — use generic references like 'a coworker' if needed."
+    mutual_block = _format_mutual_block(mutuals, casual=False)
 
+    events_text = events.format_shared_events_for_prompt(main_si, contact.get("sim_info"))
+    events_block = f"\n\n{events_text}" if events_text else ""
 
     prompt = (
-        f"Person being called:\n{rel_desc}{history_block}{mutual_block}\n\n"
+        f"Person being called:\n{rel_desc}{history_block}{mutual_block}{events_block}\n\n"
         f"{main_name} is calling {other_name}. {main_name} says: \"{player_topic}\"\n\n"
         f"Write what {other_name} says in response (3-5 lines of dialogue). "
         f"They should react naturally to what {main_name} said."
@@ -2093,7 +2767,7 @@ def send_call(contact, player_topic, callback=None, output=None):
 
     def _on_send_call_result(text, error):
         if text:
-            text = moodlets.clean_response(text)
+            text = _apply_mood_from_text(text, recipient=main_si, is_incoming=False)
             if rid in _conversations:
                 _conversations[rid]["history"].append({"role": "them", "text": text})
             journal.add_entry(
