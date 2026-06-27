@@ -10,7 +10,7 @@ import subprocess
 import sys
 import threading
 
-from . import config
+from . import config, _log
 
 _API_URL = "https://api.anthropic.com/v1/messages"
 _API_VERSION = "2023-06-01"
@@ -179,18 +179,21 @@ def call_claude_async(messages, system=None, use_fast_model=False, callback=None
                     url,
                 ],
                 capture_output=True,
-                text=True,
                 timeout=60,
                 startupinfo=startupinfo,
             )
 
+            stdout_str = (result.stdout or b"").decode("utf-8", errors="replace")
+            stderr_str = (result.stderr or b"").decode("utf-8", errors="replace")
+
             if result.returncode != 0:
-                err = result.stderr.strip() or f"curl exited with code {result.returncode}"
+                err = stderr_str.strip() or f"curl exited with code {result.returncode}"
                 if callback:
                     callback(None, f"Network error: {err}")
                 return
 
-            data = json.loads(result.stdout)
+            _log(f"  api_client: raw response: {stdout_str}")
+            data = json.loads(stdout_str)
 
             # Check for API error response
             if "error" in data:
@@ -209,7 +212,7 @@ def call_claude_async(messages, system=None, use_fast_model=False, callback=None
 
         except json.JSONDecodeError:
             if callback:
-                callback(None, f"Invalid response from API: {result.stdout[:200]}")
+                callback(None, f"Invalid response from API: {stdout_str[:200]}")
 
         except FileNotFoundError:
             if callback:

@@ -9,7 +9,7 @@ Players can reply with claude.reply <message> to continue the conversation.
 import random
 import threading
 
-from . import api_client, sim_context, config, journal, notifications, moodlets, events
+from . import api_client, sim_context, config, journal, notifications, moodlets, events, _log
 
 # Conversations keyed by recipient sim_id, so concurrent texts/calls to different
 # household sims don't overwrite each other.
@@ -2625,7 +2625,18 @@ def generate_reply(player_message, callback=None, output=None):
                 callback(text_clean, None)
 
         if delay > 0:
-            threading.Timer(delay, _show_reply).start()
+            _log(f"    scheduling reply with delay: {delay} seconds")
+            try:
+                import alarms
+                from date_and_time import create_time_span
+                def _on_alarm(alarm_handle):
+                    _show_reply()
+                time_span = create_time_span(minutes=delay / 60.0)
+                alarms.add_alarm_real_time(None, time_span, _on_alarm, repeating=False)
+                _log("      scheduled via alarms.add_alarm_real_time successfully")
+            except Exception as alarm_err:
+                _log(f"      alarms scheduling failed: {alarm_err}, falling back to threading.Timer")
+                threading.Timer(delay, _show_reply).start()
         else:
             _show_reply()
 
@@ -2681,44 +2692,77 @@ def send_text(contact, player_message, callback=None, output=None):
     )
 
     def _on_send_text_result(text, error):
+        _log(f"  _on_send_text_result entered, text={text}, error={error}")
         if error:
+            _log(f"    error received: {error}")
             notifications.show_error(error, output=output)
             if callback:
                 callback(text, error)
             return
         if not text:
+            _log("    no text returned from API")
             if callback:
                 callback(text, error)
             return
 
-        text_clean = _apply_mood_from_text(text, recipient=main_si, is_incoming=False)
-        delay = _calculate_reply_delay(contact)
+        try:
+            text_clean = _apply_mood_from_text(text, recipient=main_si, is_incoming=False)
+            _log(f"    text cleaned: {text_clean}")
+            delay = _calculate_reply_delay(contact)
+            _log(f"    calculated delay: {delay}")
 
-        def _show_reply():
-            if rid in _conversations:
-                _conversations[rid]["history"].append({"role": "them", "text": text_clean})
-            journal.add_entry(
-                "text",
-                f"Text conversation with {other_name}:\n"
-                f"{main_name}: {player_message}\n"
-                f"{other_name}: {text_clean}",
-                sim_name=other_name,
-                recipient_name=main_name,
-            )
-            title = f"Reply from {other_name}"
-            sender_si = contact.get("sim_info")
-            shown = False
-            if sender_si:
-                shown = _show_phone_dialog(sender_si, title, text_clean, ring=False)
-            if not shown:
-                notifications.show(title, text_clean, output=output)
-            if callback:
-                callback(text_clean, None)
+            def _show_reply():
+                _log("    _show_reply execution started")
+                try:
+                    if rid in _conversations:
+                        _conversations[rid]["history"].append({"role": "them", "text": text_clean})
+                        _log("      appended response to conversation history")
+                    journal.add_entry(
+                        "text",
+                        f"Text conversation with {other_name}:\n"
+                        f"{main_name}: {player_message}\n"
+                        f"{other_name}: {text_clean}",
+                        sim_name=other_name,
+                        recipient_name=main_name,
+                    )
+                    _log("      added entry to journal")
+                    title = f"Reply from {other_name}"
+                    sender_si = contact.get("sim_info")
+                    shown = False
+                    _log(f"      sender sim info: {sender_si}")
+                    if sender_si:
+                        _log("      showing phone dialog")
+                        shown = _show_phone_dialog(sender_si, title, text_clean, ring=False, recipient_sim_info=main_si)
+                        _log(f"      phone dialog shown: {shown}")
+                    if not shown:
+                        _log("      phone dialog not shown, calling notifications.show")
+                        notifications.show(title, text_clean, output=output)
+                        _log("      notifications.show completed")
+                    if callback:
+                        callback(text_clean, None)
+                except Exception as ex:
+                    import traceback
+                    _log(f"      EXCEPTION inside _show_reply:\n{traceback.format_exc()}")
 
-        if delay > 0:
-            threading.Timer(delay, _show_reply).start()
-        else:
-            _show_reply()
+            if delay > 0:
+                _log(f"    scheduling reply with delay: {delay} seconds")
+                try:
+                    import alarms
+                    from date_and_time import create_time_span
+                    def _on_alarm(alarm_handle):
+                        _show_reply()
+                    time_span = create_time_span(minutes=delay / 60.0)
+                    alarms.add_alarm_real_time(None, time_span, _on_alarm, repeating=False)
+                    _log("      scheduled via alarms.add_alarm_real_time successfully")
+                except Exception as alarm_err:
+                    _log(f"      alarms scheduling failed: {alarm_err}, falling back to threading.Timer")
+                    threading.Timer(delay, _show_reply).start()
+            else:
+                _log("    executing _show_reply immediately (delay <= 0)")
+                _show_reply()
+        except Exception as e:
+            import traceback
+            _log(f"    EXCEPTION inside _on_send_text_result setup:\n{traceback.format_exc()}")
 
     return api_client.call_claude_async(
         [{"role": "user", "content": prompt}],
@@ -2782,7 +2826,7 @@ def send_call(contact, player_topic, callback=None, output=None):
             caller_si = contact.get("sim_info")
             shown = False
             if caller_si:
-                shown = _show_phone_dialog(caller_si, title, text)
+                shown = _show_phone_dialog(caller_si, title, text, recipient_sim_info=main_si)
             if not shown:
                 notifications.show(title, text, output=output)
         elif error:

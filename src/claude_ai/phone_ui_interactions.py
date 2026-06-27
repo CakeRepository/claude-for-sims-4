@@ -97,6 +97,7 @@ def _gather_contact_choices(main_sim_info):
 def _show_message_input(kind, anchor_sim, contact, on_submit):
     """Open a single-field text-input dialog for the message body.
     Same protobuf-injection trick as the Reply dialog in phone.py."""
+    _log(f"_show_message_input(kind={kind}, anchor_sim={anchor_sim}, contact={contact})")
     try:
         from sims4.localization import LocalizationHelperTuning
         from ui.ui_dialog_generic import UiDialogTextInputOkCancel
@@ -130,6 +131,7 @@ def _show_message_input(kind, anchor_sim, contact, on_submit):
                 ti.height = 100
                 return msg
 
+        _log("  creating default dialog instance")
         dialog = _MessageDialog.TunableFactory().default(
             anchor_sim,
             text=lambda *_a, **_kw: loc_text,
@@ -137,34 +139,41 @@ def _show_message_input(kind, anchor_sim, contact, on_submit):
             text_ok=lambda *_a, **_kw: loc_send,
             text_cancel=lambda *_a, **_kw: loc_cancel,
         )
+        _log("  dialog instance created")
 
         def _on_response(response_dialog):
+            _log(f"  _on_response (message input) entered, accepted={response_dialog.accepted}")
             try:
                 if not response_dialog.accepted:
                     return
                 message = (response_dialog.text_input_responses or {}).get(
                     _MESSAGE_INPUT, ""
                 ).strip()
+                _log(f"    captured message: {message}")
                 if not message:
                     return
                 on_submit(message)
-            except Exception:
-                pass
+            except Exception as e:
+                _log_exc(f"  _on_response (message input) failed: {e}")
 
         dialog.add_listener(_on_response)
-        # Show the recipient's portrait alongside the message dialog so the
-        # player has visual confirmation they're writing to the right sim.
+        
         try:
             recipient_si = contact.get("sim_info")
             icon = IconInfoData(obj_instance=recipient_si) if recipient_si else None
+            _log(f"  showing dialog, icon={icon}")
             if icon is not None:
                 dialog.show_dialog(icon_override=icon)
             else:
                 dialog.show_dialog()
-        except Exception:
+            _log("  dialog.show_dialog() completed")
+        except Exception as e:
+            _log_exc(f"  show_dialog failed: {e}, retrying without icon")
             dialog.show_dialog()
+            _log("  dialog.show_dialog() retry completed")
         return True
-    except Exception:
+    except Exception as e:
+        _log_exc(f"_show_message_input outer failure: {e}")
         return False
 
 
@@ -242,24 +251,33 @@ def _show_recipient_picker(kind, anchor_sim, on_picked):
         _log(f"  added {added}/{len(choices)} picker rows")
 
         def _on_response(response_dialog):
+            _log(f"  _on_response entered, accepted={getattr(response_dialog, 'accepted', '?')}")
             try:
                 if not response_dialog.accepted:
+                    _log("    dialog was cancelled")
                     return
                 picked = list(getattr(response_dialog, "picked_results", None) or ())
+                _log(f"    picked results: {picked}")
                 if not picked:
+                    _log("    no items were picked")
                     return
-                # picked_results contains the option_id of the chosen row.
-                # We mapped that to the small index 0..N-1, so look up
-                # the corresponding contact from our index dict.
                 contact = option_to_contact.get(picked[0])
+                _log(f"    resolved contact for {picked[0]}: {contact}")
+                if not contact:
+                    _log("    could not resolve contact, attempting fallback via sim_id matching")
+                    for c_val in option_to_contact.values():
+                        if c_val.get("sim_id") == picked[0]:
+                            contact = c_val
+                            _log(f"      found matching contact in dict values: {contact}")
+                            break
                 if not contact:
                     notifications.show_error(
                         "Couldn't resolve the selected sim. Try again."
                     )
                     return
                 on_picked(contact)
-            except Exception:
-                pass
+            except Exception as e:
+                _log_exc(f"  _on_response failed: {e}")
 
         try:
             dialog.add_listener(_on_response)
